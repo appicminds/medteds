@@ -106,6 +106,8 @@ export const posts = pgTable(
     readingMinutes: integer("reading_minutes").notNull().default(1),
     seoTitle: text("seo_title"),
     seoDescription: text("seo_description"),
+    noindex: boolean("noindex").notNull().default(false), // hide from search engines
+    canonicalUrl: text("canonical_url"), // original address when first published elsewhere
     publishedAt: timestamp("published_at"),
     trashedAt: timestamp("trashed_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -242,6 +244,7 @@ export const pages = pgTable("pages", {
   status: text("status").notNull().default("draft"), // "draft" | "published"
   seoTitle: text("seo_title"),
   seoDescription: text("seo_description"),
+  noindex: boolean("noindex").notNull().default(false),
   authorId: text("author_id").references(() => user.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

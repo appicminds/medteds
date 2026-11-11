@@ -11,14 +11,23 @@ import { can } from "@/lib/permissions";
 import { getCurrentUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
 import { formatDate } from "@/lib/utils";
+import { alternatesFor, robotsFor, shareImages } from "@/lib/seo";
 
 const getPage = cache(async (slug: string) => db.query.pages.findFirst({ where: eq(pages.slug, slug) }));
 
 export async function generateMetadata({ params }: PageProps<"/[page]">): Promise<Metadata> {
   const { page: slug } = await params;
-  const page = await getPage(decodeURIComponent(slug));
-  if (!page || page.status !== "published") return { title: "Page not found" };
-  return { title: page.seoTitle || page.title, description: page.seoDescription || undefined };
+  const [page, settings] = await Promise.all([getPage(decodeURIComponent(slug)), getSettings()]);
+  if (!page || page.status !== "published") return { title: "Page not found", robots: { index: false, follow: false } };
+  const title = page.seoTitle || page.title;
+  const description = page.seoDescription || undefined;
+  return {
+    title,
+    description,
+    alternates: alternatesFor(`/${page.slug}`),
+    robots: robotsFor(settings, page.noindex),
+    openGraph: { siteName: settings.siteName, type: "website", title, description, url: `/${page.slug}`, images: shareImages(settings) },
+  };
 }
 
 export default async function SitePage({ params }: PageProps<"/[page]">) {

@@ -4,6 +4,8 @@ import { StoryEditor } from "@/components/cms/story-editor";
 import { can, canEditPost } from "@/lib/permissions";
 import { getEditableStory, listRevisions, listTopics, listWriters } from "@/lib/queries";
 import { requireCan } from "@/lib/session";
+import { siteOrigin } from "@/lib/seo";
+import { getSettings } from "@/lib/settings";
 
 export const metadata = { title: "Editing story" };
 
@@ -15,7 +17,12 @@ export default async function EditorPage({ params }: PageProps<"/editor/[id]">) 
   if (!canEditPost(me, story)) redirect(`/p/${story.slug}`);
   if (story.status === "trash") redirect("/me/stories?tab=trash");
   const isEditor = can(me, "editOthersPosts");
-  const [topics, revisions, writers] = await Promise.all([listTopics(), listRevisions(id), isEditor ? listWriters() : Promise.resolve([])]);
+  const [topics, revisions, writers, settings] = await Promise.all([
+    listTopics(),
+    listRevisions(id),
+    isEditor ? listWriters() : Promise.resolve([]),
+    getSettings(),
+  ]);
 
   return (
     <StoryEditor
@@ -30,6 +37,8 @@ export default async function EditorPage({ params }: PageProps<"/editor/[id]">) 
         topicIds: story.topics.map((t) => t.id),
         seoTitle: story.seoTitle,
         seoDescription: story.seoDescription,
+        noindex: story.noindex,
+        canonicalUrl: story.canonicalUrl,
         authorId: story.authorId,
         featured: story.featured,
         publishedAt: story.publishedAt?.toISOString() ?? null,
@@ -38,7 +47,9 @@ export default async function EditorPage({ params }: PageProps<"/editor/[id]">) 
       writers={writers.map((w) => ({ id: w.id, name: w.name }))}
       revisions={revisions.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }))}
       perms={{ canPublish: can(me, "publish"), isEditor }}
-      siteUrl={process.env.NEXT_PUBLIC_APP_URL ?? "https://medteds.vercel.app"}
+      siteUrl={siteOrigin()}
+      siteName={settings.siteName}
+      defaultShareImage={settings.defaultShareImage}
     />
   );
 }

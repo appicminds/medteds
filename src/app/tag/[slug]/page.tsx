@@ -7,13 +7,16 @@ import { Pager } from "@/components/blog/pager";
 import { StoryList } from "@/components/blog/story-card";
 import { bookmarkedIds, getTopic, listStories, listTopics } from "@/lib/queries";
 import { getCurrentUser } from "@/lib/session";
+import { alternatesFor } from "@/lib/seo";
 
 const PAGE_SIZE = 10;
 
 export async function generateMetadata({ params }: PageProps<"/tag/[slug]">): Promise<Metadata> {
   const { slug } = await params;
   const t = await getTopic(slug);
-  return t ? { title: t.name, description: t.description ?? undefined } : { title: "Topic not found" };
+  return t
+    ? { title: t.name, description: t.description ?? undefined, alternates: alternatesFor(`/tag/${t.slug}`) }
+    : { title: "Topic not found", robots: { index: false, follow: false } };
 }
 
 export default async function TopicPage({ params, searchParams }: PageProps<"/tag/[slug]">) {

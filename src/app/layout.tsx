@@ -4,6 +4,7 @@ import { TopBar } from "@/components/blog/top-bar";
 import { SiteFooter } from "@/components/blog/site-footer";
 import { themeScript } from "@/components/blog/theme-toggle";
 import { getSettings } from "@/lib/settings";
+import { robotsFor, shareImages, siteOrigin, twitterCard } from "@/lib/seo";
 import "./globals.css";
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
@@ -11,11 +12,18 @@ const serif = Source_Serif_4({ variable: "--font-source-serif", subsets: ["latin
 
 export async function generateMetadata(): Promise<Metadata> {
   const s = await getSettings();
+  const title = s.tagline ? `${s.siteName}: ${s.tagline}` : s.siteName;
   return {
-    title: { default: s.tagline ? `${s.siteName}: ${s.tagline}` : s.siteName, template: `%s · ${s.siteName}` },
+    title: { default: title, template: `%s · ${s.siteName}` },
     description: s.tagline || undefined,
-    metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"),
+    metadataBase: new URL(siteOrigin()),
+    applicationName: s.siteName,
     icons: s.logoUrl ? { icon: s.logoUrl } : undefined,
+    robots: robotsFor(s),
+    alternates: { types: { "application/rss+xml": [{ url: "/feed.xml", title: `${s.siteName} stories` }] } },
+    openGraph: { siteName: s.siteName, type: "website", title, description: s.tagline || undefined, images: shareImages(s) },
+    twitter: twitterCard(s, { title, description: s.tagline || undefined }),
+    verification: s.googleVerification ? { google: s.googleVerification } : undefined,
   };
 }
 

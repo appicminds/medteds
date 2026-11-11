@@ -26,6 +26,7 @@ type PageData = {
   status: "draft" | "published";
   seoTitle: string;
   seoDescription: string;
+  noindex: boolean;
 };
 
 export function PageEditor({ page, siteUrl }: { page: PageData; siteUrl: string }) {
@@ -35,6 +36,7 @@ export function PageEditor({ page, siteUrl }: { page: PageData; siteUrl: string 
   const [slugTouched, setSlugTouched] = useState(!!page.slug);
   const [seoTitle, setSeoTitle] = useState(page.seoTitle);
   const [seoDescription, setSeoDescription] = useState(page.seoDescription);
+  const [noindex, setNoindex] = useState(page.noindex);
   const [status, setStatus] = useState(page.status);
   const [dirty, setDirty] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -71,6 +73,7 @@ export function PageEditor({ page, siteUrl }: { page: PageData; siteUrl: string 
         status: nextStatus,
         seoTitle,
         seoDescription,
+        noindex,
         content: JSON.parse(JSON.stringify(editorRef.current?.getJSON() ?? { type: "doc", content: [] })),
       });
       if (!res.ok) return setMsg({ ok: false, text: res.error });
@@ -156,6 +159,13 @@ export function PageEditor({ page, siteUrl }: { page: PageData; siteUrl: string 
           <Field label="Search description" htmlFor="page-seo-desc" hint={`${seoDescription.length}/160`}>
             <Textarea id="page-seo-desc" value={seoDescription} maxLength={160} onChange={(e) => { setSeoDescription(e.target.value); setDirty(true); }} className="min-h-16" />
           </Field>
+          <label className="flex cursor-pointer items-start gap-2 text-sm">
+            <input type="checkbox" checked={noindex} onChange={(e) => { setNoindex(e.target.checked); setDirty(true); }} className="mt-0.5 h-4 w-4 accent-[var(--accent)]" />
+            <span>
+              Hide from search engines
+              <span className="block text-xs text-muted">The page stays public but isn&apos;t listed on Google.</span>
+            </span>
+          </label>
           <div className="border-t border-line pt-4">
             <DeletePageButton id={page.id} onDeleted={() => router.push("/admin/pages")} />
           </div>

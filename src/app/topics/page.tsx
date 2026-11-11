@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { listTopics } from "@/lib/queries";
+import { alternatesFor } from "@/lib/seo";
 
-export const metadata = { title: "All topics" };
+export const metadata = { title: "All topics", alternates: alternatesFor("/topics") };
 
 export default async function TopicsPage() {
   const topics = await listTopics();

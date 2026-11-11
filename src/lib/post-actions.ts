@@ -142,6 +142,14 @@ const saveSchema = z.object({
   slug: z.string().max(120, "Keep the address under 120 characters.").optional().nullable(),
   seoTitle: z.string().max(70, "Search titles can be up to 70 characters.").optional().nullable(),
   seoDescription: z.string().max(160, "Search descriptions can be up to 160 characters.").optional().nullable(),
+  noindex: z.boolean().optional(),
+  canonicalUrl: z
+    .string()
+    .trim()
+    .max(2000)
+    .refine((v) => v === "" || /^https?:\/\/[^\s]+$/i.test(v), "The original address must start with http:// or https://.")
+    .optional()
+    .nullable(),
   authorId: z.string().optional().nullable(),
   featured: z.boolean().optional(),
 });
@@ -168,6 +176,8 @@ async function applySave(input: SaveInput, me: CurrentUser) {
     readingMinutes: readingMinutes(text),
     seoTitle: data.seoTitle?.trim() || null,
     seoDescription: data.seoDescription?.trim() || null,
+    ...(data.noindex !== undefined ? { noindex: data.noindex } : {}),
+    ...(data.canonicalUrl !== undefined ? { canonicalUrl: data.canonicalUrl || null } : {}),
     updatedAt: new Date(),
   };
   // A custom address only applies once the story has one (drafts get theirs on publish).

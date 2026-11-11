@@ -5,6 +5,7 @@ import { PageEditor } from "@/components/cms/page-editor";
 import { db } from "@/db";
 import { pages } from "@/db/schema";
 import { requireCan } from "@/lib/session";
+import { siteOrigin } from "@/lib/seo";
 
 export const metadata = { title: "Edit page" };
 
@@ -23,8 +24,9 @@ export default async function EditPage({ params }: PageProps<"/admin/pages/[id]"
         status: page.status as "draft" | "published",
         seoTitle: page.seoTitle ?? "",
         seoDescription: page.seoDescription ?? "",
+        noindex: page.noindex,
       }}
-      siteUrl={process.env.NEXT_PUBLIC_APP_URL ?? "https://medteds.vercel.app"}
+      siteUrl={siteOrigin()}
     />
   );
 }

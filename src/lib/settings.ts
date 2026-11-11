@@ -16,6 +16,14 @@ export type SiteSettings = {
   footerMenu: MenuItem[];
   signupOpen: boolean;
   commentApproval: "none" | "first" | "all";
+  /** Image used when a page or story without its own image is shared. */
+  defaultShareImage: string | null;
+  /** X (Twitter) handle without the @, for sharing cards. */
+  twitterHandle: string;
+  /** When false, the whole site asks search engines not to index it. */
+  searchVisible: boolean;
+  /** Google Search Console verification code (the content of the meta tag). */
+  googleVerification: string;
 };
 
 export const DEFAULT_SETTINGS: SiteSettings = {
@@ -33,6 +41,10 @@ export const DEFAULT_SETTINGS: SiteSettings = {
   ],
   signupOpen: true,
   commentApproval: "first",
+  defaultShareImage: null,
+  twitterHandle: "",
+  searchVisible: true,
+  googleVerification: "",
 };
 
 /** Site settings for this request, with defaults filled in. */

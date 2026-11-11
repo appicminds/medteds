@@ -14,6 +14,7 @@ import {
   Heading2,
   Heading3,
   History,
+  SearchCheck,
   Images,
   ImagePlus,
   Italic,
@@ -28,10 +29,11 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Field, FormMessage, Input, Select, Textarea } from "@/components/ui/field";
+import { Field, FormMessage, Input, Select } from "@/components/ui/field";
 import { Cover } from "@/components/ui/cover";
 import { MediaPickerDialog } from "@/components/cms/media-browser";
 import { RevisionsDialog, type RevisionRow } from "@/components/cms/revisions-dialog";
+import { SeoPanel, seoChecks, type SeoValues } from "@/components/cms/seo-panel";
 import { uploadImage } from "@/components/cms/upload";
 import {
   publishStory,
@@ -57,6 +59,8 @@ export type EditorStory = {
   topicIds: number[];
   seoTitle: string | null;
   seoDescription: string | null;
+  noindex: boolean;
+  canonicalUrl: string | null;
   authorId: string;
   featured: boolean;
   publishedAt: string | null;
@@ -85,6 +89,8 @@ export function StoryEditor({
   revisions,
   perms,
   siteUrl,
+  siteName,
+  defaultShareImage,
 }: {
   story: EditorStory;
   topics: Topic[];
@@ -92,6 +98,8 @@ export function StoryEditor({
   revisions: RevisionRow[];
   perms: { canPublish: boolean; isEditor: boolean };
   siteUrl: string;
+  siteName: string;
+  defaultShareImage: string | null;
 }) {
   const router = useRouter();
   const [title, setTitle] = useState(story.title);
@@ -101,6 +109,9 @@ export function StoryEditor({
   const [slug, setSlug] = useState(story.slug.startsWith("draft-") ? "" : story.slug);
   const [seoTitle, setSeoTitle] = useState(story.seoTitle ?? "");
   const [seoDescription, setSeoDescription] = useState(story.seoDescription ?? "");
+  const [noindex, setNoindex] = useState(story.noindex);
+  const [canonicalUrl, setCanonicalUrl] = useState(story.canonicalUrl ?? "");
+  const [seoOpen, setSeoOpen] = useState(false);
   const [authorId, setAuthorId] = useState(story.authorId);
   const [featured, setFeatured] = useState(story.featured);
   const [when, setWhen] = useState<"now" | "later">(story.status === "scheduled" ? "later" : "now");
@@ -161,10 +172,10 @@ export function StoryEditor({
     editorRef.current = editor;
   }, [editor]);
 
-  const latest = useRef({ title, subtitle, cover, topicIds, slug, seoTitle, seoDescription, authorId, featured });
+  const latest = useRef({ title, subtitle, cover, topicIds, slug, seoTitle, seoDescription, noindex, canonicalUrl, authorId, featured });
   useEffect(() => {
-    latest.current = { title, subtitle, cover, topicIds, slug, seoTitle, seoDescription, authorId, featured };
-  }, [title, subtitle, cover, topicIds, slug, seoTitle, seoDescription, authorId, featured]);
+    latest.current = { title, subtitle, cover, topicIds, slug, seoTitle, seoDescription, noindex, canonicalUrl, authorId, featured };
+  }, [title, subtitle, cover, topicIds, slug, seoTitle, seoDescription, noindex, canonicalUrl, authorId, featured]);
 
   const payload = useCallback((): SaveInput => {
     const l = latest.current;
@@ -177,6 +188,8 @@ export function StoryEditor({
       slug: l.slug || null,
       seoTitle: l.seoTitle || null,
       seoDescription: l.seoDescription || null,
+      noindex: l.noindex,
+      canonicalUrl: l.canonicalUrl.trim() || null,
       authorId: perms.isEditor ? l.authorId : null,
       featured: perms.isEditor ? l.featured : undefined,
       // ProseMirror builds attrs with a null prototype; a JSON round-trip makes them plain objects React can send.
@@ -287,8 +300,17 @@ export function StoryEditor({
         ? "Schedule"
         : "Publish";
   const host = siteUrl.replace(/^https?:\/\//, "");
-  const previewTitle = seoTitle || title || "Untitled story";
-  const previewDesc = seoDescription || subtitle || "Your story's first lines will show here.";
+  const hasSlug = !story.slug.startsWith("draft-");
+  const seoValues: SeoValues = { slug, seoTitle, seoDescription, noindex, canonicalUrl };
+  const seoTodo = seoChecks({ ...seoValues, title, subtitle, hasImage: !!(cover || defaultShareImage), topicCount: topicIds.length, hasSlug }).filter((c) => !c.ok).length;
+  const changeSeo = (patch: Partial<SeoValues>) => {
+    if (patch.slug !== undefined) setSlug(patch.slug);
+    if (patch.seoTitle !== undefined) setSeoTitle(patch.seoTitle);
+    if (patch.seoDescription !== undefined) setSeoDescription(patch.seoDescription);
+    if (patch.noindex !== undefined) setNoindex(patch.noindex);
+    if (patch.canonicalUrl !== undefined) setCanonicalUrl(patch.canonicalUrl);
+    scheduleSave();
+  };
 
   return (
     <div className="mx-auto max-w-[760px] px-4 pb-24 sm:px-6">
@@ -305,6 +327,19 @@ export function StoryEditor({
           className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-muted hover:text-fg"
         >
           <History size={16} /> <span className="hidden sm:inline">Revisions</span> ({revisions.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setSeoOpen(true)}
+          className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-muted hover:text-fg"
+          aria-label={seoTodo ? `SEO, ${seoTodo} suggestion${seoTodo === 1 ? "" : "s"}` : "SEO"}
+        >
+          <SearchCheck size={16} /> SEO
+          {seoTodo ? (
+            <span className="grid h-4 min-w-4 place-items-center rounded-pill bg-warning-soft px-1 text-[10px] font-semibold text-warning" aria-hidden>
+              {seoTodo}
+            </span>
+          ) : null}
         </button>
         <Link href={`/p/${story.slug}`} target="_blank" className="text-sm text-muted hover:text-fg">
           Preview
@@ -492,31 +527,24 @@ export function StoryEditor({
                 </section>
               ) : null}
 
-              <details className="group rounded-md border border-line" open={!!(seoTitle || seoDescription)}>
-                <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium">
-                  Address and search listing <span className="font-normal text-muted">(optional)</span>
-                </summary>
-                <div className="flex flex-col gap-4 border-t border-line px-4 py-4">
-                  {story.slug.startsWith("draft-") ? (
-                    <p className="text-xs text-muted">The story&apos;s web address is created from its title when it&apos;s first published. You can change it after that.</p>
-                  ) : (
-                    <Field label="Web address" htmlFor="story-slug" hint={`${host}/p/${slug || "…"}`}>
-                      <Input id="story-slug" value={slug} maxLength={120} onChange={(e) => { setSlug(e.target.value); scheduleSave(); }} />
-                    </Field>
-                  )}
-                  <Field label="Search title" htmlFor="seo-title" hint={`${seoTitle.length}/70. Leave blank to use the story title.`}>
-                    <Input id="seo-title" value={seoTitle} maxLength={70} onChange={(e) => { setSeoTitle(e.target.value); scheduleSave(); }} />
-                  </Field>
-                  <Field label="Search description" htmlFor="seo-desc" hint={`${seoDescription.length}/160. Leave blank to use the subtitle.`}>
-                    <Textarea id="seo-desc" value={seoDescription} maxLength={160} onChange={(e) => { setSeoDescription(e.target.value); scheduleSave(); }} className="min-h-16" />
-                  </Field>
-                  <div className="rounded-md bg-surface p-3" aria-label="Search result preview">
-                    <p className="truncate text-xs text-muted">{host} › p › {slug || "…"}</p>
-                    <p className="truncate text-base text-accent">{previewTitle}</p>
-                    <p className="line-clamp-2 text-xs text-muted">{previewDesc}</p>
-                  </div>
+              <section className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-line px-4 py-3">
+                <div className="min-w-0 text-sm">
+                  <p className="font-medium">SEO and sharing</p>
+                  <p className="text-muted">
+                    {noindex ? "Hidden from search engines." : seoTodo ? `${seoTodo} suggestion${seoTodo === 1 ? "" : "s"} to improve how this story shows in search.` : "Ready for search and sharing."}
+                  </p>
                 </div>
-              </details>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setPanelOpen(false);
+                    setSeoOpen(true);
+                  }}
+                >
+                  Edit SEO
+                </Button>
+              </section>
 
               {perms.isEditor ? (
                 <section className="flex flex-col gap-4">
@@ -581,6 +609,20 @@ export function StoryEditor({
           </div>
         </div>
       ) : null}
+
+      <SeoPanel
+        open={seoOpen}
+        onClose={() => setSeoOpen(false)}
+        values={seoValues}
+        onChange={changeSeo}
+        title={title}
+        subtitle={subtitle}
+        image={cover || defaultShareImage}
+        topicCount={topicIds.length}
+        hasSlug={hasSlug}
+        host={host}
+        siteName={siteName}
+      />
 
       <RevisionsDialog
         open={revisionsOpen}

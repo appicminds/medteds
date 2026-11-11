@@ -8,11 +8,19 @@ import { StoryList } from "@/components/blog/story-card";
 import { bookmarkedIds, getProfile, listStories } from "@/lib/queries";
 import { getCurrentUser } from "@/lib/session";
 import { compactNumber, formatDate } from "@/lib/utils";
+import { alternatesFor } from "@/lib/seo";
 
 export async function generateMetadata({ params }: PageProps<"/u/[username]">): Promise<Metadata> {
   const { username } = await params;
   const p = await getProfile(decodeURIComponent(username));
-  return p ? { title: `${p.name} (@${p.username})`, description: p.bio ?? undefined } : { title: "Writer not found" };
+  return p
+    ? {
+        title: `${p.name} (@${p.username})`,
+        description: p.bio ?? undefined,
+        alternates: alternatesFor(`/@${p.username}`),
+        openGraph: { type: "profile", title: p.name, description: p.bio ?? undefined, url: `/@${p.username}`, images: p.image ? [p.image] : undefined },
+      }
+    : { title: "Writer not found", robots: { index: false, follow: false } };
 }
 
 export default async function ProfilePage({ params }: PageProps<"/u/[username]">) {

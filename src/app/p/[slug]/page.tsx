@@ -19,30 +19,44 @@ import { getCurrentUser } from "@/lib/session";
 import { compactNumber, formatDate } from "@/lib/utils";
 import { canEditPost } from "@/lib/permissions";
 import { isLive } from "@/lib/live";
+import { absoluteUrl, alternatesFor, jsonLd, robotsFor, shareImages, twitterCard } from "@/lib/seo";
+import { getSettings } from "@/lib/settings";
 import type { JSONContent } from "@tiptap/core";
 
 export async function generateMetadata({ params }: PageProps<"/p/[slug]">): Promise<Metadata> {
   const { slug } = await params;
-  const story = await getStory(slug);
-  if (!story || !isLive(story)) return { title: "Story not found" };
-  const title = story.seoTitle || story.title;
+  const [story, settings] = await Promise.all([getStory(slug), getSettings()]);
+  if (!story || !isLive(story)) return { title: "Story not found", robots: { index: false, follow: false } };
+  const title = story.seoTitle || story.title || "Untitled story";
   const description = story.seoDescription || story.subtitle || story.excerpt || undefined;
+  const authorUrl = absoluteUrl(`/@${story.author.username}`);
   return {
-    title: { absolute: story.seoTitle || `${story.title} · MedTeds` },
+    title: { absolute: story.seoTitle || `${story.title || "Untitled story"} · ${settings.siteName}` },
     description,
+    authors: [{ name: story.author.name, url: authorUrl }],
+    keywords: story.topics.map((t) => t.name),
+    alternates: alternatesFor(`/p/${story.slug}`, story.canonicalUrl),
+    robots: robotsFor(settings, story.noindex),
     openGraph: {
+      siteName: settings.siteName,
       title,
       description,
       type: "article",
-      images: story.coverImage ? [story.coverImage] : undefined,
+      url: `/p/${story.slug}`,
+      publishedTime: story.publishedAt?.toISOString(),
+      modifiedTime: story.updatedAt.toISOString(),
+      authors: [authorUrl],
+      tags: story.topics.map((t) => t.name),
+      images: shareImages(settings, story.coverImage),
     },
+    twitter: twitterCard(settings, { title, description, image: story.coverImage }),
   };
 }
 
 export default async function StoryPage({ params }: PageProps<"/p/[slug]">) {
   const { slug } = await params;
   const me = await getCurrentUser();
-  const story = await getStory(slug, me?.id);
+  const [story, settings] = await Promise.all([getStory(slug, me?.id), getSettings()]);
   if (!story || story.authorBanned) notFound();
 
   const isAuthor = me?.id === story.author.id;
@@ -53,8 +67,28 @@ export default async function StoryPage({ params }: PageProps<"/p/[slug]">) {
   const html = await renderStoryHtml(story.content as JSONContent);
   const more = (await listStories({ authorId: story.author.id, limit: 4 })).filter((s) => s.id !== story.id).slice(0, 3);
 
+  const image = story.coverImage || settings.defaultShareImage;
+  const articleLd = {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: (story.seoTitle || story.title || "Untitled story").slice(0, 110),
+    description: story.seoDescription || story.subtitle || story.excerpt || undefined,
+    image: image ? [absoluteUrl(image)] : undefined,
+    datePublished: story.publishedAt?.toISOString(),
+    dateModified: story.updatedAt.toISOString(),
+    author: { "@type": "Person", name: story.author.name, url: absoluteUrl(`/@${story.author.username}`) },
+    publisher: {
+      "@type": "Organization",
+      name: settings.siteName,
+      logo: settings.logoUrl ? { "@type": "ImageObject", url: absoluteUrl(settings.logoUrl) } : undefined,
+    },
+    mainEntityOfPage: story.canonicalUrl || absoluteUrl(`/p/${story.slug}`),
+    keywords: story.topics.map((t) => t.name).join(", ") || undefined,
+  };
+
   return (
     <main className="mx-auto max-w-[728px] px-4 pb-24 pt-10 sm:px-6 sm:pt-12">
+      {live ? <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(articleLd) }} /> : null}
       {live && !isAuthor ? <ViewTracker postId={story.id} /> : null}
       {!live ? (
         <div className="mb-8 flex flex-wrap items-center justify-between gap-3 rounded-md bg-warning-soft px-4 py-3 text-sm text-warning">

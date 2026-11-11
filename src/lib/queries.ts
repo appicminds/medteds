@@ -129,6 +129,8 @@ export async function getStory(slug: string, viewerId?: string) {
       updatedAt: posts.updatedAt,
       seoTitle: posts.seoTitle,
       seoDescription: posts.seoDescription,
+      noindex: posts.noindex,
+      canonicalUrl: posts.canonicalUrl,
       authorBio: user.bio,
       authorBanned: user.banned,
     })
@@ -164,6 +166,8 @@ export async function getStory(slug: string, viewerId?: string) {
     updatedAt: row.updatedAt,
     seoTitle: row.seoTitle,
     seoDescription: row.seoDescription,
+    noindex: row.noindex,
+    canonicalUrl: row.canonicalUrl,
     authorBio: row.authorBio,
     authorBanned: row.authorBanned,
     authorFollowers: followers?.n ?? 0,

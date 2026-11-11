@@ -10,7 +10,7 @@ export default async function AdminSettings() {
   const s = await getSettings();
   return (
     <>
-      <AdminHeader title="Settings" description="Your site's name, look, sign-ups and response rules." />
+      <AdminHeader title="Settings" description="Your site's name, look, search and sharing, sign-ups and response rules." />
       <SettingsForm
         initial={{
           siteName: s.siteName,
@@ -20,6 +20,10 @@ export default async function AdminSettings() {
           social: s.social,
           signupOpen: s.signupOpen,
           commentApproval: s.commentApproval,
+          defaultShareImage: s.defaultShareImage ?? "",
+          twitterHandle: s.twitterHandle,
+          searchVisible: s.searchVisible,
+          googleVerification: s.googleVerification,
         }}
       />
     </>

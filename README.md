@@ -50,7 +50,7 @@ The rules live in `src/lib/permissions.ts`.
 | Page | Path |
 |---|---|
 | New story | `/write` |
-| Editor: autosave, images (upload or library), topics, cover, schedule, web address, search title and description, revisions | `/editor/[id]` |
+| Editor: autosave, images (upload or library), topics, cover, schedule, revisions, and an **SEO** panel (web address, search title and description, Google and social previews, checklist, hide from search, canonical URL) | `/editor/[id]` |
 | Your stories: drafts, published, trash | `/me/stories` |
 | Settings: profile, photo, theme, password | `/settings` |
 
@@ -66,7 +66,14 @@ The rules live in `src/lib/permissions.ts`.
 | Topics `/admin/topics` | Add, edit and delete topics |
 | Users `/admin/users` | Invite by email with a role, change roles, suspend, edit profiles, create password-reset links, delete with story reassignment |
 | Menus `/admin/menus` | Header and footer links |
-| Settings `/admin/settings` | Site name, tagline, logo, brand colour, social links, open or closed sign-up, response approval rules |
+| Settings `/admin/settings` | Site name, tagline, logo, brand colour, social links, search and sharing (default sharing image, X handle, Google Search Console code, hide the whole site from search), open or closed sign-up, response approval rules |
+
+## SEO
+
+- Every story and page gets a canonical link, Open Graph and X (Twitter) sharing tags, and stories also get Article structured data for Google.
+- `/sitemap.xml` lists live stories, pages, topics and writers. `/robots.txt` points to it and keeps private areas out of search. `/feed.xml` is an RSS feed of the latest 30 stories.
+- Stories and pages can be hidden from search individually; Admin → Settings can hide the whole site.
+- To get listed on Google, verify the site in Google Search Console (paste the code in Admin → Settings) and submit `/sitemap.xml`.
 
 Scheduled stories go live at their publish time automatically; no background job is needed. Trashed stories are deleted for good after 30 days.
 

@@ -10,7 +10,7 @@ import { bookmarkedIds, listStories, listTopics } from "@/lib/queries";
 import { getCurrentUser } from "@/lib/session";
 import { and, eq, ilike, or } from "drizzle-orm";
 
-export const metadata = { title: "Search" };
+export const metadata = { title: "Search", robots: { index: false, follow: true } };
 
 export default async function SearchPage({ searchParams }: PageProps<"/search">) {
   const raw = (await searchParams).q;

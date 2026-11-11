@@ -19,7 +19,7 @@ export type ActionResult = { ok: true; message?: string } | { ok: false; error: 
 const RESERVED = new Set([
   "admin", "api", "editor", "me", "p", "u", "tag", "topics", "search", "signin", "signup", "settings",
   "write", "reading-list", "design", "invite", "forgot-password", "reset-password",
-  "_next", "favicon.ico", "robots.txt", "sitemap.xml",
+  "_next", "favicon.ico", "robots.txt", "sitemap.xml", "feed.xml",
 ]);
 
 /* ------------------------------------------------------------------ */
@@ -41,6 +41,7 @@ const pageSchema = z.object({
   status: z.enum(["draft", "published"]),
   seoTitle: z.string().trim().max(70, "Search titles can be up to 70 characters.").optional().nullable(),
   seoDescription: z.string().trim().max(160, "Search descriptions can be up to 160 characters.").optional().nullable(),
+  noindex: z.boolean().optional(),
 });
 
 export type PageInput = z.input<typeof pageSchema>;
@@ -66,6 +67,7 @@ export async function savePage(input: PageInput): Promise<ActionResult & { slug?
       status: d.status,
       seoTitle: d.seoTitle || null,
       seoDescription: d.seoDescription || null,
+      noindex: d.noindex ?? existing.noindex,
       updatedAt: new Date(),
     })
     .where(eq(pages.id, d.id));
@@ -131,6 +133,23 @@ const settingsSchema = z.object({
   social: z.object({ website: optionalUrl, twitter: optionalUrl, linkedin: optionalUrl, instagram: optionalUrl, youtube: optionalUrl }),
   signupOpen: z.boolean(),
   commentApproval: z.enum(["none", "first", "all"]),
+  defaultShareImage: z
+    .string()
+    .trim()
+    .max(2000)
+    .refine((u) => !u || u.startsWith("/") || /^https:\/\//i.test(u), "Upload a sharing image instead of pasting a link."),
+  twitterHandle: z
+    .string()
+    .trim()
+    .transform((h) => h.replace(/^@/, ""))
+    .refine((h) => !h || /^[A-Za-z0-9_]{1,15}$/.test(h), "X handles use up to 15 letters, numbers and underscores."),
+  searchVisible: z.boolean(),
+  googleVerification: z
+    .string()
+    .trim()
+    .max(200)
+    .transform((v) => v.match(/content=["']([^"']+)["']/)?.[1] ?? v)
+    .refine((v) => !v || /^[A-Za-z0-9_-]+$/.test(v), "Paste the code from Google Search Console, or the whole meta tag."),
 });
 
 export type SettingsInput = z.input<typeof settingsSchema>;
@@ -144,6 +163,7 @@ export async function saveSiteSettings(input: SettingsInput): Promise<ActionResu
     ...d,
     logoUrl: d.logoUrl || null,
     accentColor: d.accentColor || null,
+    defaultShareImage: d.defaultShareImage || null,
   };
   await saveSettings(patch);
   revalidatePath("/", "layout");

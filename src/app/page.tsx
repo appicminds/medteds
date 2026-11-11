@@ -6,6 +6,9 @@ import { StoryList } from "@/components/blog/story-card";
 import { Pager } from "@/components/blog/pager";
 import { bookmarkedIds, listStories, listTopics } from "@/lib/queries";
 import { getCurrentUser } from "@/lib/session";
+import { alternatesFor } from "@/lib/seo";
+
+export const metadata = { alternates: alternatesFor("/") };
 
 const PAGE_SIZE = 10;
 

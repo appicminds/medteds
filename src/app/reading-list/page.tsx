@@ -4,7 +4,7 @@ import { StoryList } from "@/components/blog/story-card";
 import { listBookmarks } from "@/lib/queries";
 import { requireUser } from "@/lib/session";
 
-export const metadata = { title: "Reading list" };
+export const metadata = { title: "Reading list", robots: { index: false, follow: false } };
 
 export default async function ReadingListPage() {
   const me = await requireUser("/reading-list");
