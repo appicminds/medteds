@@ -20,7 +20,19 @@ const google =
       }
     : undefined;
 
+// Vercel serves the site at several addresses (production alias, per-deploy and per-branch URLs).
+// Sign-in only accepts requests from trusted addresses, so list the ones Vercel provides.
+const trustedOrigins = [
+  process.env.BETTER_AUTH_URL,
+  process.env.NEXT_PUBLIC_APP_URL,
+  process.env.VERCEL_PROJECT_PRODUCTION_URL && `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`,
+  process.env.VERCEL_BRANCH_URL && `https://${process.env.VERCEL_BRANCH_URL}`,
+  process.env.VERCEL_URL && `https://${process.env.VERCEL_URL}`,
+  ...(process.env.TRUSTED_ORIGINS ?? "").split(",").map((o) => o.trim()),
+].filter((o): o is string => !!o);
+
 export const auth = betterAuth({
+  trustedOrigins,
   database: drizzleAdapter(db, {
     provider: "pg",
     schema: {
