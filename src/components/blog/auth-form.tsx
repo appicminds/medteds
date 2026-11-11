@@ -51,7 +51,8 @@ export function AuthForm({
       else setError(msg || "Something went wrong. Try again.");
       return;
     }
-    router.push(target);
+    // New readers pick their interests first, then carry on to where they were going.
+    router.push(mode === "signup" ? `/welcome/topics?next=${encodeURIComponent(target)}` : target);
     router.refresh();
   }
 

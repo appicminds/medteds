@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { bookmarks, claps, comments, follows, posts, topics, user } from "@/db/schema";
+import { bookmarks, claps, comments, follows, posts, topicFollows, topics, user } from "@/db/schema";
 import { getCurrentUser, requireCan, requireUser } from "@/lib/session";
 import { can, ROLES, type Role } from "@/lib/permissions";
 import { isLive } from "@/lib/live";
@@ -71,6 +71,36 @@ export async function toggleFollow(userId: string): Promise<boolean | null> {
   }
   revalidatePath("/", "layout");
   return !existing;
+}
+
+/** Follows or unfollows a topic. Returns the new state, or null when signed out. */
+export async function toggleTopicFollow(topicId: number): Promise<boolean | null> {
+  const me = await getCurrentUser();
+  if (!me) return null;
+  const where = and(eq(topicFollows.userId, me.id), eq(topicFollows.topicId, topicId));
+  const existing = await db.query.topicFollows.findFirst({ where });
+  if (existing) await db.delete(topicFollows).where(where);
+  else {
+    const topic = await db.query.topics.findFirst({ where: eq(topics.id, topicId), columns: { id: true } });
+    if (!topic) return null;
+    await db.insert(topicFollows).values({ userId: me.id, topicId }).onConflictDoNothing();
+  }
+  revalidatePath("/", "layout");
+  return !existing;
+}
+
+/** Saves the topics picked on the welcome screen. */
+export async function setTopicFollows(topicIds: number[]): Promise<ActionResult> {
+  const me = await getCurrentUser();
+  if (!me) return { ok: false, error: "Sign in first." };
+  const ids = [...new Set(topicIds.filter((n) => Number.isInteger(n)))].slice(0, 50);
+  await db.delete(topicFollows).where(eq(topicFollows.userId, me.id));
+  if (ids.length) {
+    const valid = await db.select({ id: topics.id }).from(topics).where(inArray(topics.id, ids));
+    if (valid.length) await db.insert(topicFollows).values(valid.map((t) => ({ userId: me.id, topicId: t.id }))).onConflictDoNothing();
+  }
+  revalidatePath("/", "layout");
+  return { ok: true };
 }
 
 const commentSchema = z.object({

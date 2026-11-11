@@ -5,9 +5,10 @@ import { Chip } from "@/components/ui/chip";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Pager } from "@/components/blog/pager";
 import { StoryList } from "@/components/blog/story-card";
-import { bookmarkedIds, getTopic, listStories, listTopics } from "@/lib/queries";
+import { bookmarkedIds, getTopic, listStories, listTopics, topicFollowInfo } from "@/lib/queries";
 import { getCurrentUser } from "@/lib/session";
 import { alternatesFor } from "@/lib/seo";
+import { FollowTopicButton } from "@/components/blog/follow-topic-button";
 import { clip, DESCRIPTION_MAX } from "@/lib/seo-auto";
 
 const PAGE_SIZE = 10;
@@ -30,10 +31,12 @@ export default async function TopicPage({ params, searchParams }: PageProps<"/ta
   const topic = await getTopic(slug);
   if (!topic) notFound();
   const me = await getCurrentUser();
-  const [stories, all] = await Promise.all([
+  const [stories, all, followInfo] = await Promise.all([
     listStories({ topicSlug: slug, limit: PAGE_SIZE + 1, offset: (page - 1) * PAGE_SIZE }),
     listTopics(),
+    topicFollowInfo(me?.id),
   ]);
+  const fi = followInfo.get(topic.id) ?? { followers: 0, following: false };
   const shown = stories.slice(0, PAGE_SIZE);
   const saved = await bookmarkedIds(me?.id, shown.map((s) => s.id));
   const count = all.find((t) => t.slug === slug)?.storyCount ?? 0;
@@ -45,7 +48,10 @@ export default async function TopicPage({ params, searchParams }: PageProps<"/ta
         <p className="text-xs uppercase tracking-[0.12em] text-muted">Topic</p>
         <h1 className="text-4xl font-bold tracking-tight">{topic.name}</h1>
         {topic.description ? <p className="max-w-md text-muted">{topic.description}</p> : null}
-        <p className="text-sm text-muted">{count} {count === 1 ? "story" : "stories"}</p>
+        <p className="text-sm text-muted">
+          {count} {count === 1 ? "story" : "stories"} · {fi.followers} {fi.followers === 1 ? "follower" : "followers"}
+        </p>
+        <FollowTopicButton topicId={topic.id} topicName={topic.name} following={fi.following} signedIn={!!me} size="md" />
         {related.length ? (
           <div className="mt-3 flex flex-wrap justify-center gap-2">
             {related.map((t) => (

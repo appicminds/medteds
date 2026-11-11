@@ -18,7 +18,7 @@ export type ActionResult = { ok: true; message?: string } | { ok: false; error: 
 /** Addresses already used by the app, so a page can't hide them. */
 const RESERVED = new Set([
   "admin", "api", "editor", "me", "p", "u", "tag", "topics", "search", "signin", "signup", "settings",
-  "write", "reading-list", "design", "invite", "forgot-password", "reset-password",
+  "write", "reading-list", "design", "invite", "forgot-password", "reset-password", "welcome", "notifications", "library", "list",
   "_next", "favicon.ico", "robots.txt", "sitemap.xml", "feed.xml",
 ]);
 

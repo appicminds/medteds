@@ -3,6 +3,7 @@ import { Search, SquarePen } from "lucide-react";
 import { Logo } from "@/components/ui/logo";
 import { ButtonLink } from "@/components/ui/button";
 import { UserMenu } from "@/components/blog/user-menu";
+import { TopicBar } from "@/components/blog/topic-bar";
 import { getCurrentUser } from "@/lib/session";
 import { can } from "@/lib/permissions";
 import { getSettings } from "@/lib/settings";
@@ -66,6 +67,7 @@ export async function TopBar() {
         </ul>
       </nav>
     ) : null}
+    <TopicBar />
     </>
   );
 }

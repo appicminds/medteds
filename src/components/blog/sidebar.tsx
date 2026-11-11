@@ -2,18 +2,22 @@ import Link from "next/link";
 import { Avatar } from "@/components/ui/avatar";
 import { Chip } from "@/components/ui/chip";
 import { FollowButton } from "@/components/blog/follow-button";
-import { listStories, listTopics, whoToFollow } from "@/lib/queries";
+import { followedTopics, listStories, listTopics, whoToFollow } from "@/lib/queries";
 import { getCurrentUser } from "@/lib/session";
 
 export async function Sidebar() {
   const me = await getCurrentUser();
-  const [picks, topics, people] = await Promise.all([
+  const [picks, allTopics, people, mine] = await Promise.all([
     listStories({ featured: true, limit: 3 }),
-    listTopics(8),
+    listTopics(),
     whoToFollow(me?.id, 3),
+    followedTopics(me?.id),
   ]);
+  // Recommend topics the reader doesn't follow yet.
+  const followedIds = new Set(mine.map((t) => t.id));
+  const topics = allTopics.filter((t) => !followedIds.has(t.id)).slice(0, 8);
   return (
-    <div className="sticky top-[97px] flex flex-col gap-10">
+    <div className="sticky top-[134px] flex flex-col gap-10">
       {picks.length ? (
         <section>
           <h3 className="mb-4 font-semibold">Editor&apos;s picks</h3>

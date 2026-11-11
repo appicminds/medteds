@@ -2,7 +2,7 @@ import "server-only";
 import { and, desc, eq, ne, sql, inArray, notInArray, type SQL } from "drizzle-orm";
 import type { JSONContent } from "@tiptap/core";
 import { db } from "@/db";
-import { bookmarks, claps, comments, follows, pages, postRevisions, postTopics, posts, topics, user } from "@/db/schema";
+import { bookmarks, claps, comments, follows, pages, postRevisions, postTopics, posts, topicFollows, topics, user } from "@/db/schema";
 import { storyText } from "@/lib/content";
 import { isLive, liveRawP, liveSql } from "@/lib/live";
 import { clip, DESCRIPTION_MAX, effectiveSeo, seoChecks, seoScore } from "@/lib/seo-auto";
@@ -89,6 +89,8 @@ export async function listStories(opts: {
   followingOf?: string;
   featured?: boolean;
   query?: string;
+  /** Put stories from this reader's followed topics and writers first. */
+  personalFor?: string;
   limit?: number;
   offset?: number;
 }): Promise<StoryCardData[]> {
@@ -106,6 +108,15 @@ export async function listStories(opts: {
     );
   }
   let order: SQL[] = [desc(posts.publishedAt)];
+  if (opts.personalFor) {
+    const uid = opts.personalFor;
+    order = [
+      sql`case when "posts"."author_id" in (select f.following_id from follows f where f.follower_id = ${uid})
+        or "posts"."id" in (select pt.post_id from post_topics pt join topic_follows tf on tf.topic_id = pt.topic_id where tf.user_id = ${uid})
+        then 0 else 1 end`,
+      desc(posts.publishedAt),
+    ];
+  }
   if (opts.query) {
     const doc = sql`to_tsvector('english', ${posts.title} || ' ' || coalesce(${posts.subtitle}, '') || ' ' || coalesce(${posts.excerpt}, '') || ' ' || ${user.name})`;
     const q = sql`websearch_to_tsquery('english', ${opts.query})`;
@@ -219,6 +230,25 @@ export async function listTopics(limit?: number) {
     .from(topics)
     .orderBy(desc(sql`5`), topics.name);
   return limit ? q.limit(limit) : q;
+}
+
+/** Topics a reader follows, alphabetically. */
+export async function followedTopics(userId: string | undefined) {
+  if (!userId) return [];
+  return db
+    .select({ id: topics.id, slug: topics.slug, name: topics.name })
+    .from(topicFollows)
+    .innerJoin(topics, eq(topicFollows.topicId, topics.id))
+    .where(eq(topicFollows.userId, userId))
+    .orderBy(topics.name);
+}
+
+/** Followers per topic and whether this reader follows each one. */
+export async function topicFollowInfo(userId: string | undefined) {
+  const rows = await db.execute<{ topic_id: number; n: number; mine: boolean }>(sql`
+    select topic_id, count(*)::int as n, bool_or(user_id = ${userId ?? ""}) as mine
+    from topic_follows group by topic_id`);
+  return new Map(rows.rows.map((r) => [Number(r.topic_id), { followers: Number(r.n), following: !!r.mine }]));
 }
 
 export async function getTopic(slug: string) {

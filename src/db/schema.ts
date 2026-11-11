@@ -89,6 +89,21 @@ export const topics = pgTable("topics", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+/** Topics a reader follows; they shape the topic bar and the "For you" feed. */
+export const topicFollows = pgTable(
+  "topic_follows",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    topicId: integer("topic_id")
+      .notNull()
+      .references(() => topics.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.topicId] }), index("topic_follows_topic_idx").on(t.topicId)],
+);
+
 export const posts = pgTable(
   "posts",
   {
