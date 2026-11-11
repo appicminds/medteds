@@ -300,6 +300,28 @@ export const media = pgTable(
   (t) => [index("media_created_idx").on(t.createdAt)],
 );
 
+/**
+ * Things that happened to a reader's stories, responses or profile.
+ * type: "clap" | "response" | "reply" | "follow" | "new_story" | "published"
+ */
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").references(() => user.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    postId: text("post_id").references(() => posts.id, { onDelete: "cascade" }),
+    commentId: text("comment_id").references(() => comments.id, { onDelete: "cascade" }),
+    count: integer("count").notNull().default(1), // claps added
+    readAt: timestamp("read_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(), // may be in the future for scheduled stories
+  },
+  (t) => [index("notifications_user_idx").on(t.userId, t.createdAt), index("notifications_post_idx").on(t.postId)],
+);
+
 /* ------------------------------------------------------------------ */
 /* Relations                                                           */
 /* ------------------------------------------------------------------ */

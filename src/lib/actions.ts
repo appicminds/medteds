@@ -4,12 +4,13 @@ import { revalidatePath } from "next/cache";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { bookmarks, claps, comments, follows, posts, topicFollows, topics, user } from "@/db/schema";
+import { bookmarks, claps, comments, follows, notifications, posts, topicFollows, topics, user } from "@/db/schema";
 import { getCurrentUser, requireCan, requireUser } from "@/lib/session";
 import { can, ROLES, type Role } from "@/lib/permissions";
 import { isLive } from "@/lib/live";
 import { getSettings } from "@/lib/settings";
 import { newId } from "@/lib/utils";
+import { notify, notifyClap } from "@/lib/notifications";
 import { normalizeUsername, slugify } from "@/lib/usernames";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
@@ -29,6 +30,7 @@ export async function clapStory(postId: string, times: number): Promise<{ total:
     columns: { authorId: true, status: true, publishedAt: true },
   });
   if (!post || !isLive(post) || post.authorId === me.id) return null;
+  const [before] = await db.select({ n: claps.count }).from(claps).where(and(eq(claps.userId, me.id), eq(claps.postId, postId)));
   await db
     .insert(claps)
     .values({ userId: me.id, postId, count: add })
@@ -40,6 +42,8 @@ export async function clapStory(postId: string, times: number): Promise<{ total:
     db.select({ n: claps.count }).from(claps).where(and(eq(claps.userId, me.id), eq(claps.postId, postId))),
     db.select({ n: sql<number>`coalesce(sum(${claps.count}),0)::int` }).from(claps).where(eq(claps.postId, postId)),
   ]);
+  const added = (mine?.n ?? 0) - (before?.n ?? 0);
+  if (added > 0) await notifyClap(post.authorId, me.id, postId, added);
   return { total: total.n, mine: mine?.n ?? 0 };
 }
 
@@ -68,6 +72,7 @@ export async function toggleFollow(userId: string): Promise<boolean | null> {
     await db.delete(follows).where(and(eq(follows.followerId, me.id), eq(follows.followingId, userId)));
   } else {
     await db.insert(follows).values({ followerId: me.id, followingId: userId }).onConflictDoNothing();
+    await notify({ to: userId, actor: me.id, type: "follow" });
   }
   revalidatePath("/", "layout");
   return !existing;
@@ -119,13 +124,30 @@ export async function addComment(_prev: ActionResult | null, form: FormData): Pr
   });
   if (!post || !isLive(post)) return { ok: false, error: "This story is no longer available." };
   const status = await newCommentStatus(me);
-  await db.insert(comments).values({ id: newId(), postId: parsed.data.postId, userId: me.id, body: parsed.data.body, status });
+  const commentId = newId();
+  await db.insert(comments).values({ id: commentId, postId: parsed.data.postId, userId: me.id, body: parsed.data.body, status });
+  // Held responses notify the author once a moderator approves them.
+  if (status === "approved") await notifyResponse(commentId);
   revalidatePath(`/p/${post.slug}`);
   revalidatePath("/admin", "layout");
   return {
     ok: true,
     message: status === "approved" ? "Response published." : "Thanks! Your response will appear once a moderator approves it.",
   };
+}
+
+/** Tells the story's author about a published response, once. */
+async function notifyResponse(commentId: string) {
+  const c = await db
+    .select({ id: comments.id, postId: comments.postId, userId: comments.userId, authorId: posts.authorId })
+    .from(comments)
+    .innerJoin(posts, eq(comments.postId, posts.id))
+    .where(eq(comments.id, commentId));
+  const row = c[0];
+  if (!row) return;
+  const already = await db.query.notifications.findFirst({ where: eq(notifications.commentId, commentId), columns: { id: true } });
+  if (already) return;
+  await notify({ to: row.authorId, actor: row.userId, type: "response", postId: row.postId, commentId });
 }
 
 /** Whether a new response appears straight away, following Admin → Settings → Responses. */
@@ -151,6 +173,7 @@ export async function moderateComments(ids: string[], action: CommentModeration)
   else {
     const status = action === "approve" ? "approved" : action === "spam" ? "spam" : "pending";
     await db.update(comments).set({ status }).where(inArray(comments.id, ids));
+    if (status === "approved") for (const id of ids) await notifyResponse(id);
   }
   revalidatePath("/", "layout");
   const n = ids.length;

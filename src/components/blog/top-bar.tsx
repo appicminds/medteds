@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Search, SquarePen } from "lucide-react";
+import { Bell, Search, SquarePen } from "lucide-react";
 import { Logo } from "@/components/ui/logo";
 import { ButtonLink } from "@/components/ui/button";
 import { UserMenu } from "@/components/blog/user-menu";
@@ -7,9 +7,11 @@ import { TopicBar } from "@/components/blog/topic-bar";
 import { getCurrentUser } from "@/lib/session";
 import { can } from "@/lib/permissions";
 import { getSettings } from "@/lib/settings";
+import { unreadCount } from "@/lib/notifications";
 
 export async function TopBar() {
   const [me, settings] = await Promise.all([getCurrentUser(), getSettings()]);
+  const unread = me ? await unreadCount(me.id) : 0;
   return (
     <>
     <header className="sticky top-0 z-40 border-b border-line bg-bg">
@@ -36,6 +38,20 @@ export async function TopBar() {
           <Link href="/write" className="flex items-center gap-1.5 text-sm text-muted hover:text-fg">
             <SquarePen size={22} strokeWidth={1.6} />
             <span className="hidden sm:inline">Write</span>
+          </Link>
+        ) : null}
+        {me ? (
+          <Link
+            href="/notifications"
+            aria-label={unread ? `Notifications, ${unread} unread` : "Notifications"}
+            className="relative text-muted hover:text-fg"
+          >
+            <Bell size={22} strokeWidth={1.6} />
+            {unread ? (
+              <span className="absolute -right-1.5 -top-1.5 grid h-[18px] min-w-[18px] place-items-center rounded-pill bg-accent px-1 text-[10px] font-semibold text-accent-fg tabular-nums" aria-hidden>
+                {unread > 99 ? "99+" : unread}
+              </span>
+            ) : null}
           </Link>
         ) : null}
         {me ? (

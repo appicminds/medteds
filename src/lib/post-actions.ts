@@ -12,6 +12,7 @@ import { can, canEditPost } from "@/lib/permissions";
 import { requireCan, requireUser, type CurrentUser } from "@/lib/session";
 import { slugify } from "@/lib/usernames";
 import { newId } from "@/lib/utils";
+import { clearStoryNotifications, notifyStoryLive } from "@/lib/notifications";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -260,6 +261,8 @@ export async function publishStory(input: SaveInput, publishAt?: string | null):
     })
     .where(eq(posts.id, post.id));
   await snapshot(post.id, me.id);
+  // Followers hear about a story once, when it first goes live (or will, if scheduled).
+  if (post.status !== "published") await notifyStoryLive(post.id, { publishedBy: me.id, at: scheduled ? when! : new Date() });
   refreshPublic(slug);
   return { ok: true, slug, scheduled, message: scheduled ? "Scheduled." : "Published." };
 }
@@ -282,6 +285,7 @@ export async function submitForReview(input: SaveInput): Promise<ActionResult> {
 export async function unpublishStory(id: string) {
   const { post } = await loadEditablePost(id);
   await db.update(posts).set({ status: "draft", featured: false, updatedAt: new Date() }).where(eq(posts.id, post.id));
+  await clearStoryNotifications(post.id);
   refreshPublic(post.slug);
 }
 
@@ -291,6 +295,7 @@ export async function trashStory(id: string) {
     .update(posts)
     .set({ status: "trash", featured: false, trashedAt: new Date(), updatedAt: new Date() })
     .where(eq(posts.id, post.id));
+  await clearStoryNotifications(post.id);
   refreshPublic(post.slug);
 }
 
@@ -379,17 +384,20 @@ export async function bulkPostAction(ids: string[], action: BulkAction): Promise
           .set({ status: "published", slug, publishedAt: p.status === "published" ? p.publishedAt : new Date(), updatedAt: new Date() })
           .where(eq(posts.id, p.id));
         await snapshot(p.id, me.id);
+        if (p.status !== "published") await notifyStoryLive(p.id, { publishedBy: me.id, at: new Date() });
         break;
       }
       case "draft":
         if (p.status === "trash") continue;
         await db.update(posts).set({ status: "draft", featured: false, updatedAt: new Date() }).where(eq(posts.id, p.id));
+        await clearStoryNotifications(p.id);
         break;
       case "trash":
         await db
           .update(posts)
           .set({ status: "trash", featured: false, trashedAt: new Date(), updatedAt: new Date() })
           .where(eq(posts.id, p.id));
+        await clearStoryNotifications(p.id);
         break;
       case "restore":
         if (p.status !== "trash") continue;
