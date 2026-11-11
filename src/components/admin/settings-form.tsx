@@ -2,6 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Field, FormMessage, Input } from "@/components/ui/field";
@@ -9,7 +10,7 @@ import { MediaPickerDialog } from "@/components/cms/media-browser";
 import { uploadImage } from "@/components/cms/upload";
 import { saveSiteSettings, type SettingsInput } from "@/lib/site-actions";
 
-type Form = Required<Pick<SettingsInput, "siteName" | "tagline" | "logoUrl" | "accentColor" | "signupOpen" | "commentApproval" | "defaultShareImage" | "twitterHandle" | "searchVisible" | "googleVerification">> & {
+type Form = Required<Pick<SettingsInput, "siteName" | "tagline" | "logoUrl" | "accentColor" | "signupOpen" | "commentApproval">> & {
   social: { website: string; twitter: string; linkedin: string; instagram: string; youtube: string };
 };
 
@@ -28,7 +29,7 @@ export function SettingsForm({ initial }: { initial: Form }) {
   const router = useRouter();
   const [f, setF] = useState<Form>(initial);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [picker, setPicker] = useState<"logo" | "share" | null>(null);
+  const [picker, setPicker] = useState(false);
   const [pending, start] = useTransition();
   const set = (patch: Partial<Form>) => setF((x) => ({ ...x, ...patch }));
 
@@ -74,7 +75,7 @@ export function SettingsForm({ initial }: { initial: Form }) {
                   }}
                 />
               </label>
-              <button type="button" className="cursor-pointer text-accent hover:underline" onClick={() => setPicker("logo")}>Choose from library</button>
+              <button type="button" className="cursor-pointer text-accent hover:underline" onClick={() => setPicker(true)}>Choose from library</button>
               {f.logoUrl ? (
                 <button type="button" className="cursor-pointer text-muted hover:text-fg" onClick={() => set({ logoUrl: "" })}>
                   Use the default mark
@@ -129,55 +130,9 @@ export function SettingsForm({ initial }: { initial: Form }) {
       </Section>
 
       <Section title="Search & sharing">
-        <label className="flex cursor-pointer items-start gap-3 text-sm">
-          <input type="checkbox" checked={f.searchVisible} onChange={(e) => set({ searchVisible: e.target.checked })} className="mt-0.5 h-4 w-4 accent-[var(--accent)]" />
-          <span>
-            <span className="font-medium">Let search engines show this site</span>
-            <span className="block text-muted">Turn this off while you&apos;re setting up. Google and others are asked not to list any page until you turn it back on.</span>
-          </span>
-        </label>
-        <div className="flex flex-col gap-2">
-          <span className="text-sm font-medium">Default sharing image</span>
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="grid h-[84px] w-40 place-items-center overflow-hidden rounded-md border border-line bg-surface">
-              {f.defaultShareImage ? <img src={f.defaultShareImage} alt="" className="h-full w-full object-cover" /> : <span className="px-2 text-center text-xs text-muted">No image</span>}
-            </div>
-            <div className="flex flex-col items-start gap-1 text-sm">
-              <label className="cursor-pointer text-accent hover:underline">
-                Upload image
-                <input
-                  type="file"
-                  accept="image/png,image/webp,image/jpeg"
-                  className="sr-only"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    const res = await uploadImage(file);
-                    if ("error" in res) setMsg({ ok: false, text: res.error });
-                    else set({ defaultShareImage: res.url });
-                  }}
-                />
-              </label>
-              <button type="button" className="cursor-pointer text-accent hover:underline" onClick={() => setPicker("share")}>Choose from library</button>
-              {f.defaultShareImage ? (
-                <button type="button" className="cursor-pointer text-muted hover:text-fg" onClick={() => set({ defaultShareImage: "" })}>
-                  Remove
-                </button>
-              ) : null}
-            </div>
-          </div>
-          <p className="text-xs text-muted">Shown when a link is shared on social media and the story has no image of its own. 1200 × 630 pixels works best.</p>
-        </div>
-        <Field label="X (Twitter) handle" htmlFor="set-twitter-handle" hint="Credited on sharing cards. For example: medteds">
-          <Input id="set-twitter-handle" value={f.twitterHandle} maxLength={16} placeholder="@yourname" onChange={(e) => set({ twitterHandle: e.target.value })} />
-        </Field>
-        <Field label="Google Search Console code" htmlFor="set-google" hint="In Search Console, choose “HTML tag” verification and paste the code or the whole tag here.">
-          <Input id="set-google" value={f.googleVerification} maxLength={200} onChange={(e) => set({ googleVerification: e.target.value })} />
-        </Field>
-        <p className="text-xs text-muted">
-          Your sitemap is at{" "}
-          <a href="/sitemap.xml" target="_blank" className="text-accent hover:underline">/sitemap.xml</a> (give this address to Search Console), and your RSS feed is at{" "}
-          <a href="/feed.xml" target="_blank" className="text-accent hover:underline">/feed.xml</a>.
+        <p className="text-sm text-muted">
+          Search engine settings, the home page&apos;s search listing and the default sharing image are in{" "}
+          <Link href="/admin/seo?tab=site" className="text-accent hover:underline">Admin → SEO</Link>.
         </p>
       </Section>
 
@@ -217,12 +172,7 @@ export function SettingsForm({ initial }: { initial: Form }) {
         </Button>
       </div>
 
-      <MediaPickerDialog
-        open={picker !== null}
-        onClose={() => setPicker(null)}
-        title={picker === "share" ? "Choose a sharing image" : "Choose a logo"}
-        onSelect={(item) => set(picker === "share" ? { defaultShareImage: item.url } : { logoUrl: item.url })}
-      />
+      <MediaPickerDialog open={picker} onClose={() => setPicker(false)} title="Choose a logo" onSelect={(item) => set({ logoUrl: item.url })} />
     </form>
   );
 }

@@ -25,7 +25,7 @@ Modelled on WordPress. Admins change roles in **Admin → Users**.
 | Subscriber | Read, clap, respond, save and follow. Everyone who signs up starts here. |
 | Contributor | Write drafts and submit them for review. Can't publish. |
 | Author | Write and publish their own stories, and upload images. |
-| Editor | Manage everyone's stories, pages, media, topics and responses. |
+| Editor | Manage everyone's stories, pages, media, topics, SEO and responses. |
 | Administrator | Everything, plus users, menus and site settings. |
 
 The rules live in `src/lib/permissions.ts`.
@@ -62,18 +62,21 @@ The rules live in `src/lib/permissions.ts`.
 | Posts `/admin/stories` | All / Published / Scheduled / Pending / Drafts / Trash / Editor's picks tabs, author and topic filters, search, bulk publish, unpublish, trash, restore, delete |
 | Media `/admin/media` | Image library: upload by drag and drop, alt text, copy link, where each image is used, delete |
 | Pages `/admin/pages` | Create and edit pages like About and Privacy |
+| SEO `/admin/seo` | Every story and page with its search title, description and score. Filter by "needs attention", edit any listing, reset to automatic, hide from search in bulk. Also topic listings, the home page listing, title separator, default sharing image, Google Search Console and sitemap links |
 | Comments `/admin/comments` | Approve, unapprove, spam or delete responses, one by one or in bulk |
 | Topics `/admin/topics` | Add, edit and delete topics |
 | Users `/admin/users` | Invite by email with a role, change roles, suspend, edit profiles, create password-reset links, delete with story reassignment |
 | Menus `/admin/menus` | Header and footer links |
-| Settings `/admin/settings` | Site name, tagline, logo, brand colour, social links, search and sharing (default sharing image, X handle, Google Search Console code, hide the whole site from search), open or closed sign-up, response approval rules |
+| Settings `/admin/settings` | Site name, tagline, logo, brand colour, social links, open or closed sign-up, response approval rules |
 
 ## SEO
 
+SEO works automatically: each story's search title comes from its title, the description from its subtitle or opening lines, and the sharing image from its cover (or the site default). The rules are in `src/lib/seo-auto.ts`. Editors and Administrators can override any of it in the story's SEO panel or in **Admin → SEO**; a blank field means automatic.
+
 - Every story and page gets a canonical link, Open Graph and X (Twitter) sharing tags, and stories also get Article structured data for Google.
 - `/sitemap.xml` lists live stories, pages, topics and writers. `/robots.txt` points to it and keeps private areas out of search. `/feed.xml` is an RSS feed of the latest 30 stories.
-- Stories and pages can be hidden from search individually; Admin → Settings can hide the whole site.
-- To get listed on Google, verify the site in Google Search Console (paste the code in Admin → Settings) and submit `/sitemap.xml`.
+- Stories and pages can be hidden from search individually; Admin → SEO → Site can hide the whole site.
+- To get listed on Google, verify the site in Google Search Console (paste the code in Admin → SEO → Site) and submit `/sitemap.xml`.
 
 Scheduled stories go live at their publish time automatically; no background job is needed. Trashed stories are deleted for good after 30 days.
 

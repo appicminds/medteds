@@ -84,6 +84,8 @@ export const topics = pgTable("topics", {
   slug: text("slug").notNull().unique(),
   name: text("name").notNull(),
   description: text("description"),
+  seoTitle: text("seo_title"),
+  seoDescription: text("seo_description"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -108,6 +110,7 @@ export const posts = pgTable(
     seoDescription: text("seo_description"),
     noindex: boolean("noindex").notNull().default(false), // hide from search engines
     canonicalUrl: text("canonical_url"), // original address when first published elsewhere
+    shareImage: text("share_image"), // custom social sharing image; blank uses the cover
     publishedAt: timestamp("published_at"),
     trashedAt: timestamp("trashed_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),

@@ -39,6 +39,7 @@ export default async function EditorPage({ params }: PageProps<"/editor/[id]">) 
         seoDescription: story.seoDescription,
         noindex: story.noindex,
         canonicalUrl: story.canonicalUrl,
+        shareImage: story.shareImage,
         authorId: story.authorId,
         featured: story.featured,
         publishedAt: story.publishedAt?.toISOString() ?? null,

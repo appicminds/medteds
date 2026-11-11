@@ -351,7 +351,7 @@ export function MediaPickerDialog({
   }, [open, onClose]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-fg/40 px-4 py-8" role="dialog" aria-modal="true" aria-label={title}>
+    <div data-media-picker="open" className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-fg/40 px-4 py-8" role="dialog" aria-modal="true" aria-label={title}>
       <div className="w-full max-w-5xl rounded-lg bg-bg p-5 shadow-pop sm:p-6">
         <div className="mb-5 flex items-center justify-between gap-4">
           <h2 className="text-xl font-bold">{title}</h2>

@@ -6,7 +6,8 @@ import type { JSONContent } from "@tiptap/core";
 import { cache } from "react";
 import { db } from "@/db";
 import { pages } from "@/db/schema";
-import { renderStoryHtml } from "@/lib/content";
+import { renderStoryHtml, storyText } from "@/lib/content";
+import { clip, DESCRIPTION_MAX } from "@/lib/seo-auto";
 import { can } from "@/lib/permissions";
 import { getCurrentUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
@@ -20,7 +21,7 @@ export async function generateMetadata({ params }: PageProps<"/[page]">): Promis
   const [page, settings] = await Promise.all([getPage(decodeURIComponent(slug)), getSettings()]);
   if (!page || page.status !== "published") return { title: "Page not found", robots: { index: false, follow: false } };
   const title = page.seoTitle || page.title;
-  const description = page.seoDescription || undefined;
+  const description = page.seoDescription || clip(storyText(page.content as JSONContent), DESCRIPTION_MAX) || undefined;
   return {
     title,
     description,

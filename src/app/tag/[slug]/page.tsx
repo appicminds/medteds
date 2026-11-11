@@ -8,6 +8,7 @@ import { StoryList } from "@/components/blog/story-card";
 import { bookmarkedIds, getTopic, listStories, listTopics } from "@/lib/queries";
 import { getCurrentUser } from "@/lib/session";
 import { alternatesFor } from "@/lib/seo";
+import { clip, DESCRIPTION_MAX } from "@/lib/seo-auto";
 
 const PAGE_SIZE = 10;
 
@@ -15,7 +16,11 @@ export async function generateMetadata({ params }: PageProps<"/tag/[slug]">): Pr
   const { slug } = await params;
   const t = await getTopic(slug);
   return t
-    ? { title: t.name, description: t.description ?? undefined, alternates: alternatesFor(`/tag/${t.slug}`) }
+    ? {
+        title: t.seoTitle || t.name,
+        description: t.seoDescription || clip(t.description, DESCRIPTION_MAX) || `Stories about ${t.name}.`,
+        alternates: alternatesFor(`/tag/${t.slug}`),
+      }
     : { title: "Topic not found", robots: { index: false, follow: false } };
 }
 

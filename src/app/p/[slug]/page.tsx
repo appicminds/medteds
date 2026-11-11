@@ -19,7 +19,8 @@ import { getCurrentUser } from "@/lib/session";
 import { compactNumber, formatDate } from "@/lib/utils";
 import { canEditPost } from "@/lib/permissions";
 import { isLive } from "@/lib/live";
-import { absoluteUrl, alternatesFor, jsonLd, robotsFor, shareImages, twitterCard } from "@/lib/seo";
+import { absoluteUrl, alternatesFor, jsonLd, robotsFor, twitterCard } from "@/lib/seo";
+import { effectiveSeo } from "@/lib/seo-auto";
 import { getSettings } from "@/lib/settings";
 import type { JSONContent } from "@tiptap/core";
 
@@ -27,11 +28,12 @@ export async function generateMetadata({ params }: PageProps<"/p/[slug]">): Prom
   const { slug } = await params;
   const [story, settings] = await Promise.all([getStory(slug), getSettings()]);
   if (!story || !isLive(story)) return { title: "Story not found", robots: { index: false, follow: false } };
-  const title = story.seoTitle || story.title || "Untitled story";
-  const description = story.seoDescription || story.subtitle || story.excerpt || undefined;
+  const seo = effectiveSeo(story, settings.defaultShareImage);
+  const title = seo.title;
+  const description = seo.description || undefined;
   const authorUrl = absoluteUrl(`/@${story.author.username}`);
   return {
-    title: { absolute: story.seoTitle || `${story.title || "Untitled story"} · ${settings.siteName}` },
+    title: { absolute: seo.customTitle ? seo.title : `${seo.autoTitle} ${settings.titleSeparator} ${settings.siteName}` },
     description,
     authors: [{ name: story.author.name, url: authorUrl }],
     keywords: story.topics.map((t) => t.name),
@@ -47,9 +49,9 @@ export async function generateMetadata({ params }: PageProps<"/p/[slug]">): Prom
       modifiedTime: story.updatedAt.toISOString(),
       authors: [authorUrl],
       tags: story.topics.map((t) => t.name),
-      images: shareImages(settings, story.coverImage),
+      images: seo.image ? [seo.image] : undefined,
     },
-    twitter: twitterCard(settings, { title, description, image: story.coverImage }),
+    twitter: twitterCard(settings, { title, description, image: seo.image }),
   };
 }
 
@@ -67,12 +69,13 @@ export default async function StoryPage({ params }: PageProps<"/p/[slug]">) {
   const html = await renderStoryHtml(story.content as JSONContent);
   const more = (await listStories({ authorId: story.author.id, limit: 4 })).filter((s) => s.id !== story.id).slice(0, 3);
 
-  const image = story.coverImage || settings.defaultShareImage;
+  const seo = effectiveSeo(story, settings.defaultShareImage);
+  const image = seo.image;
   const articleLd = {
     "@context": "https://schema.org",
     "@type": "Article",
-    headline: (story.seoTitle || story.title || "Untitled story").slice(0, 110),
-    description: story.seoDescription || story.subtitle || story.excerpt || undefined,
+    headline: seo.title.slice(0, 110),
+    description: seo.description || undefined,
     image: image ? [absoluteUrl(image)] : undefined,
     datePublished: story.publishedAt?.toISOString(),
     dateModified: story.updatedAt.toISOString(),

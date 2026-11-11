@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { posts, user } from "@/db/schema";
 import { liveSql } from "@/lib/live";
 import { absoluteUrl } from "@/lib/seo";
+import { effectiveSeo } from "@/lib/seo-auto";
 import { getSettings } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +28,7 @@ export async function GET() {
       subtitle: posts.subtitle,
       excerpt: posts.excerpt,
       seoDescription: posts.seoDescription,
+      seoTitle: posts.seoTitle,
       slug: posts.slug,
       publishedAt: posts.publishedAt,
       authorName: user.name,
@@ -41,7 +43,7 @@ export async function GET() {
   const items = rows
     .map((r) => {
       const link = absoluteUrl(`/p/${r.slug}`);
-      const description = r.seoDescription || r.subtitle || r.excerpt || "";
+      const description = effectiveSeo(r).description;
       return [
         "    <item>",
         `      <title>${esc(r.title || "Untitled story")}</title>`,

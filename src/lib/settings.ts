@@ -24,6 +24,11 @@ export type SiteSettings = {
   searchVisible: boolean;
   /** Google Search Console verification code (the content of the meta tag). */
   googleVerification: string;
+  /** Home page search title and description; blank means automatic. */
+  homeSeoTitle: string;
+  homeSeoDescription: string;
+  /** Between a page's title and the site name in browser tabs and search results. */
+  titleSeparator: string;
 };
 
 export const DEFAULT_SETTINGS: SiteSettings = {
@@ -45,6 +50,9 @@ export const DEFAULT_SETTINGS: SiteSettings = {
   twitterHandle: "",
   searchVisible: true,
   googleVerification: "",
+  homeSeoTitle: "",
+  homeSeoDescription: "",
+  titleSeparator: "·",
 };
 
 /** Site settings for this request, with defaults filled in. */

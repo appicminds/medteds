@@ -12,17 +12,18 @@ const serif = Source_Serif_4({ variable: "--font-source-serif", subsets: ["latin
 
 export async function generateMetadata(): Promise<Metadata> {
   const s = await getSettings();
-  const title = s.tagline ? `${s.siteName}: ${s.tagline}` : s.siteName;
+  const title = s.homeSeoTitle || (s.tagline ? `${s.siteName}: ${s.tagline}` : s.siteName);
+  const description = s.homeSeoDescription || s.tagline || undefined;
   return {
-    title: { default: title, template: `%s · ${s.siteName}` },
-    description: s.tagline || undefined,
+    title: { default: title, template: `%s ${s.titleSeparator} ${s.siteName}` },
+    description,
     metadataBase: new URL(siteOrigin()),
     applicationName: s.siteName,
     icons: s.logoUrl ? { icon: s.logoUrl } : undefined,
     robots: robotsFor(s),
     alternates: { types: { "application/rss+xml": [{ url: "/feed.xml", title: `${s.siteName} stories` }] } },
-    openGraph: { siteName: s.siteName, type: "website", title, description: s.tagline || undefined, images: shareImages(s) },
-    twitter: twitterCard(s, { title, description: s.tagline || undefined }),
+    openGraph: { siteName: s.siteName, type: "website", title, description, images: shareImages(s) },
+    twitter: twitterCard(s, { title, description }),
     verification: s.googleVerification ? { google: s.googleVerification } : undefined,
   };
 }

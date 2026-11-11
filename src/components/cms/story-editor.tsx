@@ -33,7 +33,8 @@ import { Field, FormMessage, Input, Select } from "@/components/ui/field";
 import { Cover } from "@/components/ui/cover";
 import { MediaPickerDialog } from "@/components/cms/media-browser";
 import { RevisionsDialog, type RevisionRow } from "@/components/cms/revisions-dialog";
-import { SeoPanel, seoChecks, type SeoValues } from "@/components/cms/seo-panel";
+import { SeoDrawer, SeoFields, type SeoValues } from "@/components/cms/seo-panel";
+import { effectiveSeo, seoChecks } from "@/lib/seo-auto";
 import { uploadImage } from "@/components/cms/upload";
 import {
   publishStory,
@@ -61,6 +62,7 @@ export type EditorStory = {
   seoDescription: string | null;
   noindex: boolean;
   canonicalUrl: string | null;
+  shareImage: string | null;
   authorId: string;
   featured: boolean;
   publishedAt: string | null;
@@ -111,6 +113,7 @@ export function StoryEditor({
   const [seoDescription, setSeoDescription] = useState(story.seoDescription ?? "");
   const [noindex, setNoindex] = useState(story.noindex);
   const [canonicalUrl, setCanonicalUrl] = useState(story.canonicalUrl ?? "");
+  const [shareImage, setShareImage] = useState(story.shareImage ?? "");
   const [seoOpen, setSeoOpen] = useState(false);
   const [authorId, setAuthorId] = useState(story.authorId);
   const [featured, setFeatured] = useState(story.featured);
@@ -172,10 +175,10 @@ export function StoryEditor({
     editorRef.current = editor;
   }, [editor]);
 
-  const latest = useRef({ title, subtitle, cover, topicIds, slug, seoTitle, seoDescription, noindex, canonicalUrl, authorId, featured });
+  const latest = useRef({ title, subtitle, cover, topicIds, slug, seoTitle, seoDescription, noindex, canonicalUrl, shareImage, authorId, featured });
   useEffect(() => {
-    latest.current = { title, subtitle, cover, topicIds, slug, seoTitle, seoDescription, noindex, canonicalUrl, authorId, featured };
-  }, [title, subtitle, cover, topicIds, slug, seoTitle, seoDescription, noindex, canonicalUrl, authorId, featured]);
+    latest.current = { title, subtitle, cover, topicIds, slug, seoTitle, seoDescription, noindex, canonicalUrl, shareImage, authorId, featured };
+  }, [title, subtitle, cover, topicIds, slug, seoTitle, seoDescription, noindex, canonicalUrl, shareImage, authorId, featured]);
 
   const payload = useCallback((): SaveInput => {
     const l = latest.current;
@@ -190,6 +193,7 @@ export function StoryEditor({
       seoDescription: l.seoDescription || null,
       noindex: l.noindex,
       canonicalUrl: l.canonicalUrl.trim() || null,
+      shareImage: l.shareImage || null,
       authorId: perms.isEditor ? l.authorId : null,
       featured: perms.isEditor ? l.featured : undefined,
       // ProseMirror builds attrs with a null prototype; a JSON round-trip makes them plain objects React can send.
@@ -301,14 +305,27 @@ export function StoryEditor({
         : "Publish";
   const host = siteUrl.replace(/^https?:\/\//, "");
   const hasSlug = !story.slug.startsWith("draft-");
-  const seoValues: SeoValues = { slug, seoTitle, seoDescription, noindex, canonicalUrl };
-  const seoTodo = seoChecks({ ...seoValues, title, subtitle, hasImage: !!(cover || defaultShareImage), topicCount: topicIds.length, hasSlug }).filter((c) => !c.ok).length;
+  const seoValues: SeoValues = { slug, seoTitle, seoDescription, noindex, canonicalUrl, shareImage };
+  // Automatic values, worked out the same way the public page does (src/lib/seo-auto.ts).
+  const seo = effectiveSeo(
+    { title, subtitle, excerpt: editor?.getText({ blockSeparator: " " }) ?? "", coverImage: cover, seoTitle, seoDescription, shareImage },
+    defaultShareImage,
+  );
+  const seoTodo = seoChecks({
+    title: seo.title,
+    description: seo.description,
+    hasImage: !!seo.image,
+    topicCount: topicIds.length,
+    slug: hasSlug ? slug : null,
+    noindex,
+  }).filter((c) => !c.ok).length;
   const changeSeo = (patch: Partial<SeoValues>) => {
     if (patch.slug !== undefined) setSlug(patch.slug);
     if (patch.seoTitle !== undefined) setSeoTitle(patch.seoTitle);
     if (patch.seoDescription !== undefined) setSeoDescription(patch.seoDescription);
     if (patch.noindex !== undefined) setNoindex(patch.noindex);
     if (patch.canonicalUrl !== undefined) setCanonicalUrl(patch.canonicalUrl);
+    if (patch.shareImage !== undefined) setShareImage(patch.shareImage);
     scheduleSave();
   };
 
@@ -610,19 +627,22 @@ export function StoryEditor({
         </div>
       ) : null}
 
-      <SeoPanel
-        open={seoOpen}
-        onClose={() => setSeoOpen(false)}
-        values={seoValues}
-        onChange={changeSeo}
-        title={title}
-        subtitle={subtitle}
-        image={cover || defaultShareImage}
-        topicCount={topicIds.length}
-        hasSlug={hasSlug}
-        host={host}
-        siteName={siteName}
-      />
+      <SeoDrawer open={seoOpen} onClose={() => setSeoOpen(false)} heading="SEO and sharing" subheading="Changes save automatically.">
+        <SeoFields
+          values={seoValues}
+          onChange={changeSeo}
+          auto={{ title: seo.autoTitle, description: seo.autoDescription, image: seo.autoImage }}
+          options={{
+            slugPrefix: "/p/",
+            slugNote: hasSlug ? undefined : "The web address is created from the title when the story is first published. You can change it here after that.",
+            canonical: true,
+            shareImage: true,
+            topicCount: topicIds.length,
+          }}
+          host={host}
+          siteName={siteName}
+        />
+      </SeoDrawer>
 
       <RevisionsDialog
         open={revisionsOpen}

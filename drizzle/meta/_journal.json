@@ -43,6 +43,13 @@
       "when": 1794416001549,
       "tag": "0005_seo",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794420080761,
+      "tag": "0006_seo_admin",
+      "breakpoints": true
     }
   ]
 }

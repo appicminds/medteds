@@ -9,7 +9,7 @@ export const ROLE_INFO: Record<Role, { label: string; description: string }> = {
   subscriber: { label: "Subscriber", description: "Reads, claps, responds, saves and follows." },
   contributor: { label: "Contributor", description: "Writes drafts and submits them for review." },
   author: { label: "Author", description: "Writes and publishes their own stories." },
-  editor: { label: "Editor", description: "Manages everyone's stories, pages, media, topics and responses." },
+  editor: { label: "Editor", description: "Manages everyone's stories, pages, media, topics, SEO and responses." },
   admin: { label: "Administrator", description: "Everything, including members, menus and site settings." },
 };
 
@@ -30,6 +30,7 @@ export type Action =
   | "manageTopics"
   | "manageMedia"
   | "managePages"
+  | "manageSeo" // search titles, descriptions and sharing for every story, page and topic
   | "manageUsers"
   | "manageMenus"
   | "manageSettings";
@@ -44,6 +45,7 @@ const MIN_ROLE: Record<Action, Role> = {
   manageTopics: "editor",
   manageMedia: "editor",
   managePages: "editor",
+  manageSeo: "editor",
   manageUsers: "admin",
   manageMenus: "admin",
   manageSettings: "admin",

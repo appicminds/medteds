@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FileText, Image as ImageIcon, LayoutDashboard, Menu, MessageCircle, Settings, StickyNote, Tags, Users } from "lucide-react";
+import { SearchCheck, FileText, Image as ImageIcon, LayoutDashboard, Menu, MessageCircle, Settings, StickyNote, Tags, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const ALL = {
@@ -10,6 +10,7 @@ const ALL = {
   posts: { href: "/admin/stories", label: "Posts", icon: FileText },
   media: { href: "/admin/media", label: "Media", icon: ImageIcon },
   pages: { href: "/admin/pages", label: "Pages", icon: StickyNote },
+  seo: { href: "/admin/seo", label: "SEO", icon: SearchCheck },
   comments: { href: "/admin/comments", label: "Comments", icon: MessageCircle },
   topics: { href: "/admin/topics", label: "Topics", icon: Tags },
   users: { href: "/admin/users", label: "Users", icon: Users },

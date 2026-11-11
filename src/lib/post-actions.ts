@@ -143,6 +143,13 @@ const saveSchema = z.object({
   seoTitle: z.string().max(70, "Search titles can be up to 70 characters.").optional().nullable(),
   seoDescription: z.string().max(160, "Search descriptions can be up to 160 characters.").optional().nullable(),
   noindex: z.boolean().optional(),
+  shareImage: z
+    .string()
+    .trim()
+    .max(2000)
+    .refine((u) => !u || u.startsWith("/") || /^https:\/\//i.test(u), "Choose a sharing image from the library.")
+    .optional()
+    .nullable(),
   canonicalUrl: z
     .string()
     .trim()
@@ -178,6 +185,7 @@ async function applySave(input: SaveInput, me: CurrentUser) {
     seoDescription: data.seoDescription?.trim() || null,
     ...(data.noindex !== undefined ? { noindex: data.noindex } : {}),
     ...(data.canonicalUrl !== undefined ? { canonicalUrl: data.canonicalUrl || null } : {}),
+    ...(data.shareImage !== undefined ? { shareImage: data.shareImage || null } : {}),
     updatedAt: new Date(),
   };
   // A custom address only applies once the story has one (drafts get theirs on publish).

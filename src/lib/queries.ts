@@ -1,8 +1,11 @@
 import "server-only";
-import { and, desc, eq, sql, inArray, notInArray, type SQL } from "drizzle-orm";
+import { and, desc, eq, ne, sql, inArray, notInArray, type SQL } from "drizzle-orm";
+import type { JSONContent } from "@tiptap/core";
 import { db } from "@/db";
-import { bookmarks, claps, comments, follows, postRevisions, postTopics, posts, topics, user } from "@/db/schema";
-import { liveRawP, liveSql } from "@/lib/live";
+import { bookmarks, claps, comments, follows, pages, postRevisions, postTopics, posts, topics, user } from "@/db/schema";
+import { storyText } from "@/lib/content";
+import { isLive, liveRawP, liveSql } from "@/lib/live";
+import { clip, DESCRIPTION_MAX, effectiveSeo, seoChecks, seoScore } from "@/lib/seo-auto";
 
 export type StoryCardData = {
   id: string;
@@ -131,6 +134,7 @@ export async function getStory(slug: string, viewerId?: string) {
       seoDescription: posts.seoDescription,
       noindex: posts.noindex,
       canonicalUrl: posts.canonicalUrl,
+      shareImage: posts.shareImage,
       authorBio: user.bio,
       authorBanned: user.banned,
     })
@@ -168,6 +172,7 @@ export async function getStory(slug: string, viewerId?: string) {
     seoDescription: row.seoDescription,
     noindex: row.noindex,
     canonicalUrl: row.canonicalUrl,
+    shareImage: row.shareImage,
     authorBio: row.authorBio,
     authorBanned: row.authorBanned,
     authorFollowers: followers?.n ?? 0,
@@ -532,4 +537,178 @@ export async function pendingReview(limit = 6) {
     .where(eq(posts.status, "pending"))
     .orderBy(desc(posts.updatedAt))
     .limit(limit);
+}
+
+/* ------------------------------------------------------------------ */
+/* Admin → SEO                                                         */
+/* ------------------------------------------------------------------ */
+
+export const SEO_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "attention", label: "Needs attention" },
+  { key: "custom", label: "Custom" },
+  { key: "hidden", label: "Hidden from search" },
+] as const;
+export type SeoFilter = (typeof SEO_FILTERS)[number]["key"];
+
+export type SeoRow = {
+  id: string;
+  kind: "story" | "page";
+  title: string;
+  slug: string;
+  status: string;
+  live: boolean;
+  authorName: string | null;
+  seoTitle: string;
+  seoDescription: string;
+  noindex: boolean;
+  canonicalUrl: string;
+  shareImage: string;
+  autoTitle: string;
+  autoDescription: string;
+  autoImage: string | null;
+  effectiveTitle: string;
+  effectiveDescription: string;
+  custom: boolean;
+  topicCount: number | null;
+  passed: number;
+  total: number;
+};
+
+function seoRow(
+  r: {
+    id: string;
+    title: string;
+    subtitle?: string | null;
+    excerpt?: string | null;
+    coverImage?: string | null;
+    slug: string;
+    status: string;
+    publishedAt?: Date | null;
+    authorName?: string | null;
+    seoTitle: string | null;
+    seoDescription: string | null;
+    noindex: boolean;
+    canonicalUrl?: string | null;
+    shareImage?: string | null;
+    topicCount?: number | null;
+  },
+  kind: "story" | "page",
+  defaultImage: string | null,
+): SeoRow {
+  const e = effectiveSeo(r, defaultImage);
+  const checks = seoChecks({
+    title: e.title,
+    description: e.description,
+    hasImage: !!e.image,
+    topicCount: kind === "story" ? (r.topicCount ?? 0) : undefined,
+    slug: kind === "story" && !r.slug.startsWith("draft-") ? r.slug : null,
+    noindex: r.noindex,
+  });
+  const { passed, total } = seoScore(checks);
+  return {
+    id: r.id,
+    kind,
+    title: r.title || "Untitled",
+    slug: r.slug,
+    status: r.status,
+    live: kind === "story" ? isLive({ status: r.status, publishedAt: r.publishedAt ?? null }) : r.status === "published",
+    authorName: r.authorName ?? null,
+    seoTitle: r.seoTitle ?? "",
+    seoDescription: r.seoDescription ?? "",
+    noindex: r.noindex,
+    canonicalUrl: r.canonicalUrl ?? "",
+    shareImage: r.shareImage ?? "",
+    autoTitle: e.autoTitle,
+    autoDescription: e.autoDescription,
+    autoImage: e.autoImage,
+    effectiveTitle: e.title,
+    effectiveDescription: e.description,
+    custom: e.customTitle || e.customDescription || e.customImage,
+    topicCount: kind === "story" ? (r.topicCount ?? 0) : null,
+    passed,
+    total,
+  };
+}
+
+function filterSeo(rows: SeoRow[], filter: SeoFilter, query: string) {
+  const q = query.trim().toLowerCase();
+  return rows.filter((r) => {
+    if (q && !`${r.title} ${r.effectiveTitle} ${r.slug}`.toLowerCase().includes(q)) return false;
+    if (filter === "attention") return r.passed < r.total;
+    if (filter === "custom") return r.custom;
+    if (filter === "hidden") return r.noindex;
+    return true;
+  });
+}
+
+/** Every story (except trash) and page with its automatic and custom SEO, scored and filtered. */
+export async function adminListSeo(opts: { kind: "stories" | "pages"; filter: SeoFilter; query?: string; page?: number; defaultImage: string | null }) {
+  const PER = 25;
+  let rows: SeoRow[];
+  if (opts.kind === "stories") {
+    const raw = await db
+      .select({
+        id: posts.id,
+        title: posts.title,
+        subtitle: posts.subtitle,
+        excerpt: posts.excerpt,
+        coverImage: posts.coverImage,
+        slug: posts.slug,
+        status: posts.status,
+        publishedAt: posts.publishedAt,
+        authorName: user.name,
+        seoTitle: posts.seoTitle,
+        seoDescription: posts.seoDescription,
+        noindex: posts.noindex,
+        canonicalUrl: posts.canonicalUrl,
+        shareImage: posts.shareImage,
+        topicCount: sql<number>`(select count(*) from post_topics pt where pt.post_id = "posts"."id")::int`,
+      })
+      .from(posts)
+      .innerJoin(user, eq(posts.authorId, user.id))
+      .where(ne(posts.status, "trash"))
+      .orderBy(desc(posts.updatedAt))
+      .limit(2000);
+    rows = raw.map((r) => seoRow(r, "story", opts.defaultImage));
+  } else {
+    const raw = await db
+      .select({
+        id: pages.id,
+        title: pages.title,
+        content: pages.content,
+        slug: pages.slug,
+        status: pages.status,
+        seoTitle: pages.seoTitle,
+        seoDescription: pages.seoDescription,
+        noindex: pages.noindex,
+      })
+      .from(pages)
+      .orderBy(pages.title);
+    rows = raw.map(({ content, ...r }) => seoRow({ ...r, excerpt: storyText(content as JSONContent) }, "page", opts.defaultImage));
+  }
+  const counts = Object.fromEntries(SEO_FILTERS.map((f) => [f.key, filterSeo(rows, f.key, "").length])) as Record<SeoFilter, number>;
+  const filtered = filterSeo(rows, opts.filter, opts.query ?? "");
+  const page = Math.max(1, opts.page ?? 1);
+  return { rows: filtered.slice((page - 1) * PER, page * PER), hasMore: filtered.length > page * PER, total: filtered.length, counts };
+}
+
+/** Topics with their SEO overrides and automatic fallbacks. */
+export async function adminListTopicSeo() {
+  const rows = await db.select().from(topics).orderBy(topics.name);
+  return rows.map((t) => ({
+    id: t.id,
+    name: t.name,
+    slug: t.slug,
+    seoTitle: t.seoTitle ?? "",
+    seoDescription: t.seoDescription ?? "",
+    autoTitle: t.name,
+    autoDescription: clip(t.description, DESCRIPTION_MAX) || `Stories about ${t.name}.`,
+  }));
+}
+
+/** Number of stories whose SEO checklist isn't complete, for the dashboard. */
+export async function seoAttentionCount(defaultImage: string | null) {
+  const { counts } = await adminListSeo({ kind: "stories", filter: "attention", defaultImage });
+  return counts.attention;
 }
