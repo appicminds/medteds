@@ -1,7 +1,8 @@
 import "server-only";
 import { and, desc, eq, sql, inArray, notInArray, type SQL } from "drizzle-orm";
 import { db } from "@/db";
-import { bookmarks, claps, comments, follows, postTopics, posts, topics, user } from "@/db/schema";
+import { bookmarks, claps, comments, follows, postRevisions, postTopics, posts, topics, user } from "@/db/schema";
+import { liveRawP, liveSql } from "@/lib/live";
 
 export type StoryCardData = {
   id: string;
@@ -21,7 +22,8 @@ export type StoryCardData = {
 
 // Subqueries in a select list are written with qualified names: Drizzle drops table prefixes there.
 const clapCount = sql<number>`coalesce((select sum(c.count) from claps c where c.post_id = "posts"."id"), 0)::int`;
-const commentCount = sql<number>`(select count(*) from comments cm where cm.post_id = "posts"."id")::int`;
+const viewCount = sql<number>`coalesce((select sum(v.count) from post_views v where v.post_id = "posts"."id"), 0)::int`;
+const commentCount = sql<number>`(select count(*) from comments cm where cm.post_id = "posts"."id" and cm.status = 'approved')::int`;
 
 const cardColumns = {
   id: posts.id,
@@ -76,7 +78,7 @@ async function attachTopics(rows: CardRow[]): Promise<StoryCardData[]> {
   }));
 }
 
-const published = and(eq(posts.status, "published"), eq(user.banned, false));
+const published = and(liveSql, eq(user.banned, false));
 
 export async function listStories(opts: {
   topicSlug?: string;
@@ -125,6 +127,8 @@ export async function getStory(slug: string, viewerId?: string) {
       content: posts.content,
       status: posts.status,
       updatedAt: posts.updatedAt,
+      seoTitle: posts.seoTitle,
+      seoDescription: posts.seoDescription,
       authorBio: user.bio,
       authorBanned: user.banned,
     })
@@ -158,6 +162,8 @@ export async function getStory(slug: string, viewerId?: string) {
     content: row.content,
     status: row.status,
     updatedAt: row.updatedAt,
+    seoTitle: row.seoTitle,
+    seoDescription: row.seoDescription,
     authorBio: row.authorBio,
     authorBanned: row.authorBanned,
     authorFollowers: followers?.n ?? 0,
@@ -165,11 +171,13 @@ export async function getStory(slug: string, viewerId?: string) {
   };
 }
 
-export async function getComments(postId: string) {
+/** Approved responses, plus the viewer's own responses that are waiting for approval. */
+export async function getComments(postId: string, viewerId?: string) {
   return db
     .select({
       id: comments.id,
       body: comments.body,
+      status: comments.status,
       createdAt: comments.createdAt,
       userId: user.id,
       name: user.name,
@@ -178,7 +186,15 @@ export async function getComments(postId: string) {
     })
     .from(comments)
     .innerJoin(user, eq(comments.userId, user.id))
-    .where(and(eq(comments.postId, postId), eq(user.banned, false)))
+    .where(
+      and(
+        eq(comments.postId, postId),
+        eq(user.banned, false),
+        viewerId
+          ? sql`(${comments.status} = 'approved' or (${comments.userId} = ${viewerId} and ${comments.status} = 'pending'))`
+          : eq(comments.status, "approved"),
+      ),
+    )
     .orderBy(desc(comments.createdAt));
 }
 
@@ -189,7 +205,7 @@ export async function listTopics(limit?: number) {
       slug: topics.slug,
       name: topics.name,
       description: topics.description,
-      storyCount: sql<number>`(select count(*) from post_topics pt join posts p on p.id = pt.post_id where pt.topic_id = "topics"."id" and p.status = 'published')::int`,
+      storyCount: sql<number>`(select count(*) from post_topics pt join posts p on p.id = pt.post_id where pt.topic_id = "topics"."id" and ${sql.raw(liveRawP)})::int`,
     })
     .from(topics)
     .orderBy(desc(sql`5`), topics.name);
@@ -214,10 +230,16 @@ export async function whoToFollow(viewerId?: string, limit = 3) {
       username: user.username,
       image: user.image,
       bio: user.bio,
-      stories: sql<number>`(select count(*) from posts p where p.author_id = "user"."id" and p.status = 'published')::int`,
+      stories: sql<number>`(select count(*) from posts p where p.author_id = "user"."id" and ${sql.raw(liveRawP)})::int`,
     })
     .from(user)
-    .where(and(eq(user.banned, false), exclude.length ? notInArray(user.id, exclude) : undefined))
+    .where(
+      and(
+        eq(user.banned, false),
+        inArray(user.role, ["contributor", "author", "editor", "admin"]),
+        exclude.length ? notInArray(user.id, exclude) : undefined,
+      ),
+    )
     .orderBy(desc(sql`6`))
     .limit(limit);
 }
@@ -265,39 +287,85 @@ export async function bookmarkedIds(userId: string | undefined, postIds: string[
   return new Set(rows.map((r) => r.id));
 }
 
-export async function listMyStories(userId: string, status: "draft" | "published") {
+export type MyStoriesTab = "drafts" | "published" | "trash";
+
+const MY_TAB_STATUSES: Record<MyStoriesTab, string[]> = {
+  drafts: ["draft", "pending"],
+  published: ["published", "scheduled"],
+  trash: ["trash"],
+};
+
+export async function listMyStories(userId: string, tab: MyStoriesTab) {
   return db
     .select({
       id: posts.id,
       slug: posts.slug,
       title: posts.title,
       excerpt: posts.excerpt,
+      status: posts.status,
       readingMinutes: posts.readingMinutes,
       publishedAt: posts.publishedAt,
       updatedAt: posts.updatedAt,
       clapCount,
       commentCount,
+      viewCount,
     })
     .from(posts)
-    .where(and(eq(posts.authorId, userId), eq(posts.status, status)))
+    .where(and(eq(posts.authorId, userId), inArray(posts.status, MY_TAB_STATUSES[tab])))
     .orderBy(desc(posts.updatedAt));
 }
 
-export async function getEditableStory(id: string, userId: string, isAdmin: boolean) {
+export async function myStoryCounts(userId: string) {
+  const rows = await db
+    .select({ status: posts.status, n: sql<number>`count(*)::int` })
+    .from(posts)
+    .where(eq(posts.authorId, userId))
+    .groupBy(posts.status);
+  const by = Object.fromEntries(rows.map((r) => [r.status, r.n])) as Record<string, number>;
+  const sum = (tab: MyStoriesTab) => MY_TAB_STATUSES[tab].reduce((n, st) => n + (by[st] ?? 0), 0);
+  return { drafts: sum("drafts"), published: sum("published"), trash: sum("trash") };
+}
+
+export async function getEditableStory(id: string) {
   const p = await db.query.posts.findFirst({
-    where: isAdmin ? eq(posts.id, id) : and(eq(posts.id, id), eq(posts.authorId, userId)),
+    where: eq(posts.id, id),
     with: { postTopics: { with: { topic: true } } },
   });
   if (!p) return null;
   return { ...p, topics: p.postTopics.map((pt) => pt.topic) };
 }
 
+export async function listRevisions(postId: string) {
+  return db
+    .select({
+      id: postRevisions.id,
+      title: postRevisions.title,
+      createdAt: postRevisions.createdAt,
+      savedByName: user.name,
+    })
+    .from(postRevisions)
+    .leftJoin(user, eq(postRevisions.savedBy, user.id))
+    .where(eq(postRevisions.postId, postId))
+    .orderBy(desc(postRevisions.createdAt))
+    .limit(30);
+}
+
+/** People who can be set as a story's author (contributor and above). */
+export async function listWriters() {
+  return db
+    .select({ id: user.id, name: user.name, username: user.username, role: user.role })
+    .from(user)
+    .where(and(inArray(user.role, ["contributor", "author", "editor", "admin"]), eq(user.banned, false)))
+    .orderBy(user.name);
+}
+
 /* ------------------------------ Admin ------------------------------ */
 
 export async function adminStats() {
-  const [[stories], [drafts], [users], [commentsN], [clapsN]] = await Promise.all([
-    db.select({ n: sql<number>`count(*)::int` }).from(posts).where(eq(posts.status, "published")),
+  const [[stories], [drafts], [pending], [users], [commentsN], [clapsN]] = await Promise.all([
+    db.select({ n: sql<number>`count(*)::int` }).from(posts).where(liveSql),
     db.select({ n: sql<number>`count(*)::int` }).from(posts).where(eq(posts.status, "draft")),
+    db.select({ n: sql<number>`count(*)::int` }).from(posts).where(eq(posts.status, "pending")),
     db.select({ n: sql<number>`count(*)::int` }).from(user),
     db.select({ n: sql<number>`count(*)::int` }).from(comments),
     db.select({ n: sql<number>`coalesce(sum(${claps.count}),0)::int` }).from(claps),
@@ -305,18 +373,58 @@ export async function adminStats() {
   return {
     stories: stories.n,
     drafts: drafts.n,
+    pending: pending.n,
     users: users.n,
     comments: commentsN.n,
     claps: clapsN.n,
   };
 }
 
-export async function adminListStories(opts: { status?: string; query?: string }) {
-  const where: (SQL | undefined)[] = [];
-  if (opts.status === "featured") where.push(eq(posts.featured, true));
-  else if (opts.status) where.push(eq(posts.status, opts.status));
+export const ADMIN_POST_TABS = ["all", "published", "scheduled", "pending", "draft", "trash", "featured"] as const;
+export type AdminPostTab = (typeof ADMIN_POST_TABS)[number];
+
+function adminTabWhere(tab: AdminPostTab): SQL | undefined {
+  switch (tab) {
+    case "all":
+      return sql`${posts.status} <> 'trash'`;
+    case "featured":
+      return and(eq(posts.featured, true), sql`${posts.status} <> 'trash'`);
+    default:
+      return eq(posts.status, tab);
+  }
+}
+
+export async function adminPostCounts() {
+  const rows = await db
+    .select({ status: posts.status, featured: posts.featured, n: sql<number>`count(*)::int` })
+    .from(posts)
+    .groupBy(posts.status, posts.featured);
+  const counts = Object.fromEntries(ADMIN_POST_TABS.map((t) => [t, 0])) as Record<AdminPostTab, number>;
+  for (const r of rows) {
+    if (r.status in counts) counts[r.status as AdminPostTab] += r.n;
+    if (r.status !== "trash") counts.all += r.n;
+    if (r.featured && r.status !== "trash") counts.featured += r.n;
+  }
+  return counts;
+}
+
+export const ADMIN_PAGE_SIZE = 25;
+
+export async function adminListStories(opts: {
+  tab: AdminPostTab;
+  query?: string;
+  authorId?: string;
+  topicId?: number;
+  page?: number;
+}) {
+  const where: (SQL | undefined)[] = [adminTabWhere(opts.tab)];
   if (opts.query) where.push(sql`${posts.title} ilike ${"%" + opts.query + "%"}`);
-  return db
+  if (opts.authorId) where.push(eq(posts.authorId, opts.authorId));
+  if (opts.topicId) {
+    where.push(sql`${posts.id} in (select ${postTopics.postId} from ${postTopics} where ${postTopics.topicId} = ${opts.topicId})`);
+  }
+  const page = Math.max(1, opts.page ?? 1);
+  const rows = await db
     .select({
       id: posts.id,
       slug: posts.slug,
@@ -325,8 +433,10 @@ export async function adminListStories(opts: { status?: string; query?: string }
       featured: posts.featured,
       publishedAt: posts.publishedAt,
       updatedAt: posts.updatedAt,
+      trashedAt: posts.trashedAt,
       clapCount,
       commentCount,
+      viewCount,
       authorName: user.name,
       authorUsername: user.username,
     })
@@ -334,7 +444,9 @@ export async function adminListStories(opts: { status?: string; query?: string }
     .innerJoin(user, eq(posts.authorId, user.id))
     .where(and(...where))
     .orderBy(desc(posts.updatedAt))
-    .limit(200);
+    .limit(ADMIN_PAGE_SIZE + 1)
+    .offset((page - 1) * ADMIN_PAGE_SIZE);
+  return { rows: rows.slice(0, ADMIN_PAGE_SIZE), hasMore: rows.length > ADMIN_PAGE_SIZE };
 }
 
 export async function adminListUsers(query?: string) {
@@ -348,7 +460,7 @@ export async function adminListUsers(query?: string) {
       role: user.role,
       banned: user.banned,
       createdAt: user.createdAt,
-      stories: sql<number>`(select count(*) from posts p where p.author_id = "user"."id" and p.status = 'published')::int`,
+      stories: sql<number>`(select count(*) from posts p where p.author_id = "user"."id" and ${sql.raw(liveRawP)})::int`,
     })
     .from(user)
     .where(query ? sql`(${user.name} ilike ${"%" + query + "%"} or ${user.email} ilike ${"%" + query + "%"})` : undefined)
@@ -356,21 +468,64 @@ export async function adminListUsers(query?: string) {
     .limit(200);
 }
 
-export async function adminListComments() {
+export const COMMENT_TABS = ["pending", "approved", "spam"] as const;
+export type CommentTab = (typeof COMMENT_TABS)[number];
+
+export async function adminCommentCounts() {
+  const rows = await db.select({ status: comments.status, n: sql<number>`count(*)::int` }).from(comments).groupBy(comments.status);
+  const counts = { pending: 0, approved: 0, spam: 0 } as Record<CommentTab, number>;
+  for (const r of rows) if (r.status in counts) counts[r.status as CommentTab] = r.n;
+  return counts;
+}
+
+export async function adminListComments(status: CommentTab = "pending", limit = 200) {
   return db
     .select({
       id: comments.id,
       body: comments.body,
+      status: comments.status,
       createdAt: comments.createdAt,
       userName: user.name,
       username: user.username,
+      userImage: user.image,
       postTitle: posts.title,
       postSlug: posts.slug,
     })
     .from(comments)
     .innerJoin(user, eq(comments.userId, user.id))
     .innerJoin(posts, eq(comments.postId, posts.id))
+    .where(eq(comments.status, status))
     .orderBy(desc(comments.createdAt))
-    .limit(200);
+    .limit(limit);
 }
 
+/* ----------------------------- Dashboard ---------------------------- */
+
+/** Views per day for the last `days` days, oldest first, with zero-filled gaps. */
+export async function viewsByDay(days = 30) {
+  const rows = await db.execute<{ day: string; n: number }>(sql`
+    select to_char(d, 'YYYY-MM-DD') as day, coalesce(sum(v.count), 0)::int as n
+    from generate_series(current_date - ${days - 1}::int, current_date, interval '1 day') d
+    left join post_views v on v.day = d::date
+    group by d order by d`);
+  return rows.rows.map((r) => ({ day: r.day, n: Number(r.n) }));
+}
+
+export async function topPosts(days = 30, limit = 5) {
+  const rows = await db.execute<{ id: string; title: string; slug: string; n: number }>(sql`
+    select p.id, p.title, p.slug, sum(v.count)::int as n
+    from post_views v join posts p on p.id = v.post_id
+    where v.day > current_date - ${days}::int
+    group by p.id order by n desc limit ${limit}`);
+  return rows.rows.map((r) => ({ ...r, n: Number(r.n) }));
+}
+
+export async function pendingReview(limit = 6) {
+  return db
+    .select({ id: posts.id, title: posts.title, updatedAt: posts.updatedAt, authorName: user.name })
+    .from(posts)
+    .innerJoin(user, eq(posts.authorId, user.id))
+    .where(eq(posts.status, "pending"))
+    .orderBy(desc(posts.updatedAt))
+    .limit(limit);
+}

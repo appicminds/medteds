@@ -1,5 +1,6 @@
 import { ProfileForm } from "@/components/cms/profile-form";
 import { ThemeToggle } from "@/components/blog/theme-toggle";
+import { ChangePasswordForm } from "@/components/blog/password-forms";
 import { requireUser } from "@/lib/session";
 
 export const metadata = { title: "Settings" };
@@ -33,6 +34,13 @@ export default async function SettingsPage() {
         <div className="pt-6">
           <p className="font-medium">Email address</p>
           <p className="text-sm text-muted">{me.email}</p>
+        </div>
+      </section>
+
+      <section className="mt-12">
+        <h2 className="border-b border-line pb-3 text-lg font-semibold">Password</h2>
+        <div className="pt-6">
+          <ChangePasswordForm />
         </div>
       </section>
     </main>

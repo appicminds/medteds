@@ -8,7 +8,15 @@ import { Avatar } from "@/components/ui/avatar";
 import { ThemeToggle } from "@/components/blog/theme-toggle";
 import { signOut } from "@/lib/auth-client";
 
-export function UserMenu({ user }: { user: { name: string; email: string; username: string; image: string | null; role: string } }) {
+export function UserMenu({
+  user,
+  canWrite,
+  canAdmin,
+}: {
+  user: { name: string; email: string; username: string; image: string | null };
+  canWrite: boolean;
+  canAdmin: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -49,9 +57,11 @@ export function UserMenu({ user }: { user: { name: string; email: string; userna
             </span>
           </Link>
           <div className="border-t border-line pt-2">
-            <Link href="/me/stories" className={item} onClick={() => setOpen(false)}>
-              <FileText size={18} /> Your stories
-            </Link>
+            {canWrite ? (
+              <Link href="/me/stories" className={item} onClick={() => setOpen(false)}>
+                <FileText size={18} /> Your stories
+              </Link>
+            ) : null}
             <Link href="/reading-list" className={item} onClick={() => setOpen(false)}>
               <Bookmark size={18} /> Reading list
             </Link>
@@ -61,7 +71,7 @@ export function UserMenu({ user }: { user: { name: string; email: string; userna
             <Link href="/settings" className={item} onClick={() => setOpen(false)}>
               <Settings size={18} /> Settings
             </Link>
-            {user.role === "admin" ? (
+            {canAdmin ? (
               <Link href="/admin" className={item} onClick={() => setOpen(false)}>
                 <Shield size={18} /> Admin
               </Link>

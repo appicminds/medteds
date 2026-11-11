@@ -48,3 +48,18 @@ export function firstImage(doc: JSONContent | null | undefined): string | null {
   }
   return null;
 }
+
+/** Keep only safe links and images in stored story JSON. */
+export function sanitizeDoc(node: JSONContent): JSONContent {
+  const safeUrl = (u: unknown) =>
+    typeof u === "string" && (/^https?:\/\//i.test(u) || /^mailto:/i.test(u) || u.startsWith("/"));
+  const out: JSONContent = { ...node };
+  if (node.marks) {
+    out.marks = node.marks.filter((m) => m.type !== "link" || safeUrl(m.attrs?.href));
+  }
+  if (node.type === "image" && !safeUrl(node.attrs?.src)) {
+    return { type: "paragraph" };
+  }
+  if (node.content) out.content = node.content.map(sanitizeDoc);
+  return out;
+}

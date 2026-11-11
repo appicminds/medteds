@@ -13,6 +13,8 @@ import {
   Code2,
   Heading2,
   Heading3,
+  History,
+  Images,
   ImagePlus,
   Italic,
   Link2,
@@ -26,13 +28,23 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { FormMessage } from "@/components/ui/field";
+import { Field, FormMessage, Input, Select, Textarea } from "@/components/ui/field";
 import { Cover } from "@/components/ui/cover";
-import { publishStory, saveStory, deleteStory, unpublishStory } from "@/lib/actions";
+import { MediaPickerDialog } from "@/components/cms/media-browser";
+import { RevisionsDialog, type RevisionRow } from "@/components/cms/revisions-dialog";
 import { uploadImage } from "@/components/cms/upload";
-import { cn } from "@/lib/utils";
+import {
+  publishStory,
+  saveStory,
+  submitForReview,
+  trashStory,
+  unpublishStory,
+  type SaveInput,
+} from "@/lib/post-actions";
+import { cn, formatDate } from "@/lib/utils";
 
 type Topic = { id: number; name: string };
+type Writer = { id: string; name: string };
 
 export type EditorStory = {
   id: string;
@@ -43,26 +55,73 @@ export type EditorStory = {
   coverImage: string | null;
   status: string;
   topicIds: number[];
+  seoTitle: string | null;
+  seoDescription: string | null;
+  authorId: string;
+  featured: boolean;
+  publishedAt: string | null;
 };
 
 type SaveState = "saved" | "saving" | "unsaved" | "error";
 
-export function StoryEditor({ story, topics }: { story: EditorStory; topics: Topic[] }) {
+const STATUS_BADGE: Record<string, { label: string; tone: "success" | "neutral" | "warning" | "accent" | "danger" }> = {
+  published: { label: "Published", tone: "success" },
+  scheduled: { label: "Scheduled", tone: "accent" },
+  pending: { label: "Pending review", tone: "warning" },
+  draft: { label: "Draft", tone: "neutral" },
+  trash: { label: "In trash", tone: "danger" },
+};
+
+/** "2026-11-11T09:30" in the browser's time zone, for <input type="datetime-local">. */
+function toLocalInput(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+export function StoryEditor({
+  story,
+  topics,
+  writers,
+  revisions,
+  perms,
+  siteUrl,
+}: {
+  story: EditorStory;
+  topics: Topic[];
+  writers: Writer[];
+  revisions: RevisionRow[];
+  perms: { canPublish: boolean; isEditor: boolean };
+  siteUrl: string;
+}) {
   const router = useRouter();
   const [title, setTitle] = useState(story.title);
   const [subtitle, setSubtitle] = useState(story.subtitle ?? "");
   const [cover, setCover] = useState<string | null>(story.coverImage);
   const [topicIds, setTopicIds] = useState<number[]>(story.topicIds);
+  const [slug, setSlug] = useState(story.slug.startsWith("draft-") ? "" : story.slug);
+  const [seoTitle, setSeoTitle] = useState(story.seoTitle ?? "");
+  const [seoDescription, setSeoDescription] = useState(story.seoDescription ?? "");
+  const [authorId, setAuthorId] = useState(story.authorId);
+  const [featured, setFeatured] = useState(story.featured);
+  const [when, setWhen] = useState<"now" | "later">(story.status === "scheduled" ? "later" : "now");
+  const [publishAt, setPublishAt] = useState(() =>
+    toLocalInput(story.status === "scheduled" && story.publishedAt ? new Date(story.publishedAt) : new Date(Date.now() + 86_400_000)),
+  );
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [publishing, startPublish] = useTransition();
+  const [revisionsOpen, setRevisionsOpen] = useState(false);
+  const [picker, setPicker] = useState<null | "body" | "cover">(null);
+  const [confirmTrash, setConfirmTrash] = useState(false);
+  const [busy, startBusy] = useTransition();
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Tiptap keeps the callbacks from its first render, so they reach current values through refs.
   const editorRef = useRef<Editor | null>(null);
   const scheduleRef = useRef<() => void>(() => {});
-  const isPublished = story.status === "published";
+  const status = story.status;
+  const isLiveOrScheduled = status === "published" || status === "scheduled";
+  const contributorLocked = !perms.canPublish && status === "pending";
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -77,7 +136,7 @@ export function StoryEditor({ story, topics }: { story: EditorStory; topics: Top
     content: story.content ?? undefined,
     editorProps: {
       attributes: { class: "prose-story min-h-[50vh] pb-24", "aria-label": "Story body" },
-      handleDrop: (view, event) => {
+      handleDrop: (_view, event) => {
         const file = event.dataTransfer?.files?.[0];
         if (file?.type.startsWith("image/")) {
           event.preventDefault();
@@ -102,23 +161,28 @@ export function StoryEditor({ story, topics }: { story: EditorStory; topics: Top
     editorRef.current = editor;
   }, [editor]);
 
-  const latest = useRef({ title, subtitle, cover, topicIds });
+  const latest = useRef({ title, subtitle, cover, topicIds, slug, seoTitle, seoDescription, authorId, featured });
   useEffect(() => {
-    latest.current = { title, subtitle, cover, topicIds };
-  }, [title, subtitle, cover, topicIds]);
+    latest.current = { title, subtitle, cover, topicIds, slug, seoTitle, seoDescription, authorId, featured };
+  }, [title, subtitle, cover, topicIds, slug, seoTitle, seoDescription, authorId, featured]);
 
-  const payload = useCallback(
-    () => ({
+  const payload = useCallback((): SaveInput => {
+    const l = latest.current;
+    return {
       id: story.id,
-      title: latest.current.title,
-      subtitle: latest.current.subtitle,
-      coverImage: latest.current.cover,
-      topicIds: latest.current.topicIds,
+      title: l.title,
+      subtitle: l.subtitle,
+      coverImage: l.cover,
+      topicIds: l.topicIds,
+      slug: l.slug || null,
+      seoTitle: l.seoTitle || null,
+      seoDescription: l.seoDescription || null,
+      authorId: perms.isEditor ? l.authorId : null,
+      featured: perms.isEditor ? l.featured : undefined,
       // ProseMirror builds attrs with a null prototype; a JSON round-trip makes them plain objects React can send.
       content: JSON.parse(JSON.stringify(editorRef.current?.getJSON() ?? { type: "doc", content: [] })) as JSONContent,
-    }),
-    [story.id],
-  );
+    };
+  }, [story.id, perms.isEditor]);
 
   const save = useCallback(async () => {
     setSaveState("saving");
@@ -142,7 +206,7 @@ export function StoryEditor({ story, topics }: { story: EditorStory; topics: Top
     scheduleRef.current = scheduleSave;
   }, [scheduleSave]);
 
-  // Save pending changes before leaving the page.
+  // Warn before leaving with unsaved changes.
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => {
       if (saveState === "unsaved" || saveState === "saving") e.preventDefault();
@@ -151,7 +215,7 @@ export function StoryEditor({ story, topics }: { story: EditorStory; topics: Top
     return () => window.removeEventListener("beforeunload", warn);
   }, [saveState]);
 
-  // Keyboard shortcut: Ctrl/Cmd+S saves now.
+  // Ctrl/Cmd+S saves now.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
@@ -171,41 +235,103 @@ export function StoryEditor({ story, topics }: { story: EditorStory; topics: Top
     editorRef.current?.chain().focus().setImage({ src: res.url, alt: "" }).run();
   }
 
-  function onPublish() {
+  function run(fn: () => Promise<{ ok: boolean; error?: string; message?: string; slug?: string; scheduled?: boolean }>, after?: (r: { slug?: string; scheduled?: boolean }) => void) {
     setError(null);
+    setNotice(null);
     if (timer.current) clearTimeout(timer.current);
-    startPublish(async () => {
-      const res = await publishStory(payload());
+    startBusy(async () => {
+      const res = await fn();
       if (!res.ok) {
-        setError(res.error);
+        setError(res.error ?? "Something went wrong. Try again.");
         return;
       }
-      router.push(`/p/${res.slug}`);
-      router.refresh();
+      setSaveState("saved");
+      if (after) after(res);
+      else {
+        setNotice(res.message ?? null);
+        setPanelOpen(false);
+        router.refresh();
+      }
     });
   }
 
+  function onPrimary() {
+    if (!perms.canPublish) {
+      run(() => submitForReview(payload()));
+      return;
+    }
+    const at = when === "later" ? new Date(publishAt) : null;
+    if (at && Number.isNaN(at.getTime())) return setError("Pick a valid date and time.");
+    run(
+      () => publishStory(payload(), at ? at.toISOString() : null),
+      (res) => {
+        if (res.scheduled) {
+          setNotice(`Scheduled to go live ${at!.toLocaleString()}.`);
+          setPanelOpen(false);
+          router.refresh();
+        } else {
+          router.push(`/p/${res.slug}`);
+          router.refresh();
+        }
+      },
+    );
+  }
+
+  const badge = STATUS_BADGE[status] ?? STATUS_BADGE.draft;
   const statusText = { saved: "Saved", saving: "Saving…", unsaved: "Unsaved changes", error: "Not saved" }[saveState];
+  const primaryLabel = !perms.canPublish
+    ? "Submit for review"
+    : status === "published"
+      ? "Update"
+      : when === "later"
+        ? "Schedule"
+        : "Publish";
+  const host = siteUrl.replace(/^https?:\/\//, "");
+  const previewTitle = seoTitle || title || "Untitled story";
+  const previewDesc = seoDescription || subtitle || "Your story's first lines will show here.";
 
   return (
     <div className="mx-auto max-w-[760px] px-4 pb-24 sm:px-6">
       {/* Editor header */}
       <div className="sticky top-[57px] z-30 -mx-4 flex flex-wrap items-center gap-3 border-b border-line bg-bg px-4 py-3 sm:-mx-6 sm:px-6">
-        <Badge tone={isPublished ? "success" : "neutral"}>{isPublished ? "Published" : "Draft"}</Badge>
+        <Badge tone={badge.tone}>{badge.label}</Badge>
         <span className={cn("text-sm", saveState === "error" ? "text-danger" : "text-muted")} aria-live="polite">
           {statusText}
         </span>
         <span className="flex-1" />
+        <button
+          type="button"
+          onClick={() => setRevisionsOpen(true)}
+          className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-muted hover:text-fg"
+        >
+          <History size={16} /> <span className="hidden sm:inline">Revisions</span> ({revisions.length})
+        </button>
         <Link href={`/p/${story.slug}`} target="_blank" className="text-sm text-muted hover:text-fg">
           Preview
         </Link>
-        <Button variant="accent" size="sm" onClick={() => setPanelOpen(true)}>
-          {isPublished ? "Update" : "Publish"}
+        <Button variant="accent" size="sm" onClick={() => setPanelOpen(true)} disabled={contributorLocked}>
+          {contributorLocked ? "In review" : primaryLabel}
         </Button>
       </div>
 
-      <Toolbar editor={editor} onImage={insertImageFile} />
+      <Toolbar editor={editor} onImage={insertImageFile} onLibrary={() => setPicker("body")} />
 
+      {status === "scheduled" && story.publishedAt ? (
+        <div className="mt-4 rounded-md bg-accent-soft px-4 py-3 text-sm text-accent">
+          Scheduled to go live {formatDate(story.publishedAt, { year: true })} at{" "}
+          {new Date(story.publishedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.
+        </div>
+      ) : null}
+      {status === "pending" ? (
+        <div className="mt-4 rounded-md bg-warning-soft px-4 py-3 text-sm text-warning">
+          {perms.canPublish ? "This story is waiting for review. Publish it when it's ready." : "Submitted for review. An editor will publish it."}
+        </div>
+      ) : null}
+      {notice && !panelOpen ? (
+        <div className="mt-4">
+          <FormMessage tone="success">{notice}</FormMessage>
+        </div>
+      ) : null}
       {error && !panelOpen ? (
         <div className="mt-4">
           <FormMessage tone="error">{error}</FormMessage>
@@ -259,21 +385,21 @@ export function StoryEditor({ story, topics }: { story: EditorStory; topics: Top
           <div className="w-full max-w-xl rounded-lg bg-bg p-6 shadow-pop sm:p-8">
             <div className="flex items-start justify-between gap-4">
               <h2 id="publish-title" className="text-2xl font-bold">
-                {isPublished ? "Update story" : "Ready to publish?"}
+                {!perms.canPublish ? "Submit for review" : status === "published" ? "Update story" : "Ready to publish?"}
               </h2>
               <button type="button" aria-label="Close" onClick={() => setPanelOpen(false)} className="cursor-pointer text-muted hover:text-fg">
                 <X size={22} />
               </button>
             </div>
 
-            <div className="mt-6 flex flex-col gap-6">
+            <div className="mt-6 flex flex-col gap-7">
               <section>
                 <h3 className="mb-2 text-sm font-medium">Story preview image</h3>
                 <div className="flex flex-wrap items-center gap-4">
                   <Cover src={cover} seed={story.id} className="h-24 w-36 rounded-sm" />
-                  <div className="flex flex-col gap-2">
-                    <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-accent hover:underline">
-                      <ImagePlus size={16} /> {cover ? "Change image" : "Upload image"}
+                  <div className="flex flex-col items-start gap-2 text-sm">
+                    <label className="cursor-pointer text-accent hover:underline">
+                      Upload image
                       <input
                         type="file"
                         accept="image/jpeg,image/png,image/webp,image/gif"
@@ -290,10 +416,13 @@ export function StoryEditor({ story, topics }: { story: EditorStory; topics: Top
                         }}
                       />
                     </label>
+                    <button type="button" className="cursor-pointer text-accent hover:underline" onClick={() => setPicker("cover")}>
+                      Choose from library
+                    </button>
                     {cover ? (
                       <button
                         type="button"
-                        className="cursor-pointer text-left text-sm text-muted hover:text-fg"
+                        className="cursor-pointer text-muted hover:text-fg"
                         onClick={() => {
                           setCover(null);
                           scheduleSave();
@@ -312,75 +441,139 @@ export function StoryEditor({ story, topics }: { story: EditorStory; topics: Top
                 <h3 className="mb-2 text-sm font-medium">
                   Topics <span className="font-normal text-muted">({topicIds.length}/5)</span>
                 </h3>
-                <p className="mb-3 text-xs text-muted">Topics help readers find your story. The first one is shown on the story card.</p>
-                <div className="flex flex-wrap gap-2">
-                  {topics.map((t) => {
-                    const on = topicIds.includes(t.id);
-                    return (
-                      <button
-                        key={t.id}
-                        type="button"
-                        aria-pressed={on}
-                        disabled={!on && topicIds.length >= 5}
-                        onClick={() => {
-                          setTopicIds((ids) => (on ? ids.filter((i) => i !== t.id) : [...ids, t.id]));
-                          scheduleSave();
-                        }}
-                        className={cn(
-                          "cursor-pointer rounded-pill px-3.5 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-                          on ? "bg-fg text-bg" : "bg-surface hover:bg-surface-2",
-                        )}
-                      >
-                        {t.name}
-                      </button>
-                    );
-                  })}
-                </div>
+                {topics.length ? (
+                  <div className="flex flex-wrap gap-2">
+                    {topics.map((t) => {
+                      const on = topicIds.includes(t.id);
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          aria-pressed={on}
+                          disabled={!on && topicIds.length >= 5}
+                          onClick={() => {
+                            setTopicIds((ids) => (on ? ids.filter((i) => i !== t.id) : [...ids, t.id]));
+                            scheduleSave();
+                          }}
+                          className={cn(
+                            "cursor-pointer rounded-pill px-3.5 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+                            on ? "bg-fg text-bg" : "bg-surface hover:bg-surface-2",
+                          )}
+                        >
+                          {t.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted">No topics yet. An editor can add them in Admin → Topics.</p>
+                )}
               </section>
+
+              {perms.canPublish && status !== "published" ? (
+                <section>
+                  <h3 className="mb-2 text-sm font-medium">When</h3>
+                  <div className="flex flex-col gap-2 text-sm" role="radiogroup" aria-label="When to publish">
+                    <label className="flex cursor-pointer items-center gap-2">
+                      <input type="radio" name="when" checked={when === "now"} onChange={() => setWhen("now")} className="accent-[var(--accent)]" />
+                      Publish now
+                    </label>
+                    <label className="flex cursor-pointer items-center gap-2">
+                      <input type="radio" name="when" checked={when === "later"} onChange={() => setWhen("later")} className="accent-[var(--accent)]" />
+                      Schedule for later
+                    </label>
+                    {when === "later" ? (
+                      <div className="pl-6">
+                        <label htmlFor="publish-at" className="sr-only">Publish date and time</label>
+                        <Input id="publish-at" type="datetime-local" value={publishAt} min={toLocalInput(new Date())} onChange={(e) => setPublishAt(e.target.value)} className="w-auto" />
+                      </div>
+                    ) : null}
+                  </div>
+                </section>
+              ) : null}
+
+              <details className="group rounded-md border border-line" open={!!(seoTitle || seoDescription)}>
+                <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium">
+                  Address and search listing <span className="font-normal text-muted">(optional)</span>
+                </summary>
+                <div className="flex flex-col gap-4 border-t border-line px-4 py-4">
+                  {story.slug.startsWith("draft-") ? (
+                    <p className="text-xs text-muted">The story&apos;s web address is created from its title when it&apos;s first published. You can change it after that.</p>
+                  ) : (
+                    <Field label="Web address" htmlFor="story-slug" hint={`${host}/p/${slug || "…"}`}>
+                      <Input id="story-slug" value={slug} maxLength={120} onChange={(e) => { setSlug(e.target.value); scheduleSave(); }} />
+                    </Field>
+                  )}
+                  <Field label="Search title" htmlFor="seo-title" hint={`${seoTitle.length}/70. Leave blank to use the story title.`}>
+                    <Input id="seo-title" value={seoTitle} maxLength={70} onChange={(e) => { setSeoTitle(e.target.value); scheduleSave(); }} />
+                  </Field>
+                  <Field label="Search description" htmlFor="seo-desc" hint={`${seoDescription.length}/160. Leave blank to use the subtitle.`}>
+                    <Textarea id="seo-desc" value={seoDescription} maxLength={160} onChange={(e) => { setSeoDescription(e.target.value); scheduleSave(); }} className="min-h-16" />
+                  </Field>
+                  <div className="rounded-md bg-surface p-3" aria-label="Search result preview">
+                    <p className="truncate text-xs text-muted">{host} › p › {slug || "…"}</p>
+                    <p className="truncate text-base text-accent">{previewTitle}</p>
+                    <p className="line-clamp-2 text-xs text-muted">{previewDesc}</p>
+                  </div>
+                </div>
+              </details>
+
+              {perms.isEditor ? (
+                <section className="flex flex-col gap-4">
+                  <Field label="Author" htmlFor="story-author">
+                    <Select id="story-author" value={authorId} onChange={(e) => { setAuthorId(e.target.value); scheduleSave(); }}>
+                      {writers.map((w) => (
+                        <option key={w.id} value={w.id}>{w.name}</option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input type="checkbox" checked={featured} onChange={(e) => { setFeatured(e.target.checked); scheduleSave(); }} className="h-4 w-4 accent-[var(--accent)]" />
+                    Show in Editor&apos;s picks
+                  </label>
+                </section>
+              ) : null}
 
               {error ? <FormMessage tone="error">{error}</FormMessage> : null}
 
               <div className="flex flex-wrap items-center gap-3 border-t border-line pt-5">
-                <Button variant="accent" onClick={onPublish} disabled={publishing}>
-                  {publishing ? "Publishing…" : isPublished ? "Save and update" : "Publish now"}
+                <Button variant="accent" onClick={onPrimary} disabled={busy}>
+                  {busy ? "Working…" : primaryLabel === "Update" ? "Save and update" : primaryLabel === "Publish" ? "Publish now" : primaryLabel}
                 </Button>
                 <Button variant="ghost" onClick={() => setPanelOpen(false)}>
                   Keep editing
                 </Button>
                 <span className="flex-1" />
-                {isPublished ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={async () => {
-                      await unpublishStory(story.id);
-                      router.refresh();
-                      setPanelOpen(false);
-                    }}
-                  >
-                    Unpublish
+                {isLiveOrScheduled || status === "pending" ? (
+                  <Button variant="outline" size="sm" disabled={busy} onClick={() => run(async () => { await unpublishStory(story.id); return { ok: true, message: "Moved to drafts." }; })}>
+                    Move to drafts
                   </Button>
                 ) : null}
-                {confirmDelete ? (
+                {confirmTrash ? (
                   <span className="flex items-center gap-2">
-                    <span className="text-sm text-danger">Delete for good?</span>
+                    <span className="text-sm text-danger">Move to trash?</span>
                     <Button
                       variant="danger"
                       size="sm"
-                      onClick={async () => {
-                        await deleteStory(story.id);
-                        router.push("/me/stories");
-                      }}
+                      onClick={() =>
+                        run(
+                          async () => {
+                            await trashStory(story.id);
+                            return { ok: true };
+                          },
+                          () => router.push("/me/stories?tab=trash"),
+                        )
+                      }
                     >
-                      Delete
+                      Yes
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(false)}>
-                      Cancel
+                    <Button variant="ghost" size="sm" onClick={() => setConfirmTrash(false)}>
+                      No
                     </Button>
                   </span>
                 ) : (
-                  <Button variant="danger-outline" size="sm" onClick={() => setConfirmDelete(true)}>
-                    Delete story
+                  <Button variant="danger-outline" size="sm" onClick={() => setConfirmTrash(true)}>
+                    Move to trash
                   </Button>
                 )}
               </div>
@@ -388,6 +581,28 @@ export function StoryEditor({ story, topics }: { story: EditorStory; topics: Top
           </div>
         </div>
       ) : null}
+
+      <RevisionsDialog
+        open={revisionsOpen}
+        onClose={() => setRevisionsOpen(false)}
+        revisions={revisions}
+        getPayload={payload}
+        onRestored={() => window.location.reload()}
+      />
+
+      <MediaPickerDialog
+        open={picker !== null}
+        onClose={() => setPicker(null)}
+        title={picker === "cover" ? "Choose a preview image" : "Insert an image"}
+        onSelect={(item) => {
+          if (picker === "cover") {
+            setCover(item.url);
+            scheduleSave();
+          } else {
+            editorRef.current?.chain().focus().setImage({ src: item.url, alt: item.alt }).run();
+          }
+        }}
+      />
     </div>
   );
 }
@@ -397,7 +612,7 @@ function autoGrow(el: HTMLTextAreaElement) {
   el.style.height = `${el.scrollHeight}px`;
 }
 
-function Toolbar({ editor, onImage }: { editor: Editor | null; onImage: (f: File) => void }) {
+export function Toolbar({ editor, onImage, onLibrary }: { editor: Editor | null; onImage: (f: File) => void; onLibrary: () => void }) {
   const state = useEditorState({
     editor,
     selector: ({ editor: e }) =>
@@ -445,6 +660,7 @@ function Toolbar({ editor, onImage }: { editor: Editor | null; onImage: (f: File
       },
     },
     { label: "Divider", icon: <Minus size={17} />, run: () => editor.chain().focus().setHorizontalRule().run() },
+    { label: "Image from library", icon: <Images size={17} />, run: onLibrary },
     { label: "Undo", icon: <Undo2 size={17} />, disabled: !state.canUndo, run: () => editor.chain().focus().undo().run() },
     { label: "Redo", icon: <Redo2 size={17} />, disabled: !state.canRedo, run: () => editor.chain().focus().redo().run() },
   ];
@@ -452,13 +668,23 @@ function Toolbar({ editor, onImage }: { editor: Editor | null; onImage: (f: File
   return (
     <div role="toolbar" aria-label="Formatting" className="sticky top-[118px] z-20 -mx-1 mt-2 flex flex-wrap gap-0.5 bg-bg py-1">
       {items.map((i) => (
-        <button key={i.label} type="button" title={i.label} aria-label={i.label} aria-pressed={i.active} disabled={i.disabled} onMouseDown={(e) => e.preventDefault()} onClick={i.run} className={btn(!!i.active)}>
+        <button
+          key={i.label}
+          type="button"
+          title={i.label}
+          aria-label={i.label}
+          aria-pressed={i.active}
+          disabled={i.disabled}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={i.run}
+          className={btn(!!i.active)}
+        >
           {i.icon}
         </button>
       ))}
-      <label title="Add image" className={btn(false) + " has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent"}>
+      <label title="Upload image" className={btn(false) + " has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent"}>
         <ImagePlus size={17} aria-hidden />
-        <span className="sr-only">Add image</span>
+        <span className="sr-only">Upload image</span>
         <input
           type="file"
           accept="image/jpeg,image/png,image/webp,image/gif"

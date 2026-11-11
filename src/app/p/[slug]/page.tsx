@@ -12,22 +12,27 @@ import { ClapButton } from "@/components/blog/clap-button";
 import { Comments } from "@/components/blog/comments";
 import { FollowButton } from "@/components/blog/follow-button";
 import { ShareButton } from "@/components/blog/share-button";
+import { ViewTracker } from "@/components/blog/view-tracker";
 import { renderStoryHtml } from "@/lib/content";
 import { getStory, listStories } from "@/lib/queries";
 import { getCurrentUser } from "@/lib/session";
 import { compactNumber, formatDate } from "@/lib/utils";
+import { canEditPost } from "@/lib/permissions";
+import { isLive } from "@/lib/live";
 import type { JSONContent } from "@tiptap/core";
 
 export async function generateMetadata({ params }: PageProps<"/p/[slug]">): Promise<Metadata> {
   const { slug } = await params;
   const story = await getStory(slug);
-  if (!story || story.status !== "published") return { title: "Story not found" };
+  if (!story || !isLive(story)) return { title: "Story not found" };
+  const title = story.seoTitle || story.title;
+  const description = story.seoDescription || story.subtitle || story.excerpt || undefined;
   return {
-    title: story.title,
-    description: story.subtitle || story.excerpt || undefined,
+    title: { absolute: story.seoTitle || `${story.title} · MedTeds` },
+    description,
     openGraph: {
-      title: story.title,
-      description: story.subtitle || story.excerpt || undefined,
+      title,
+      description,
       type: "article",
       images: story.coverImage ? [story.coverImage] : undefined,
     },
@@ -41,17 +46,25 @@ export default async function StoryPage({ params }: PageProps<"/p/[slug]">) {
   if (!story || story.authorBanned) notFound();
 
   const isAuthor = me?.id === story.author.id;
-  const canEdit = isAuthor || me?.role === "admin";
-  if (story.status !== "published" && !canEdit) notFound();
+  const canEdit = canEditPost(me, { authorId: story.author.id, status: story.status });
+  const live = isLive(story);
+  if (!live && !canEdit) notFound();
 
   const html = await renderStoryHtml(story.content as JSONContent);
   const more = (await listStories({ authorId: story.author.id, limit: 4 })).filter((s) => s.id !== story.id).slice(0, 3);
 
   return (
     <main className="mx-auto max-w-[728px] px-4 pb-24 pt-10 sm:px-6 sm:pt-12">
-      {story.status !== "published" ? (
+      {live && !isAuthor ? <ViewTracker postId={story.id} /> : null}
+      {!live ? (
         <div className="mb-8 flex flex-wrap items-center justify-between gap-3 rounded-md bg-warning-soft px-4 py-3 text-sm text-warning">
-          <span>This is a draft preview. Only you can see it.</span>
+          <span>
+            {story.status === "scheduled"
+              ? "Preview of a scheduled story. Readers can't see it yet."
+              : story.status === "pending"
+                ? "Preview of a story waiting for review. Readers can't see it yet."
+                : "This is a draft preview. Readers can't see it."}
+          </span>
           <ButtonLink href={`/editor/${story.id}`} variant="outline" size="sm">
             Continue editing
           </ButtonLink>
@@ -148,7 +161,7 @@ export default async function StoryPage({ params }: PageProps<"/p/[slug]">) {
         ) : null}
       </section>
 
-      {story.status === "published" ? (
+      {live ? (
         <div className="mt-12">
           <Comments postId={story.id} postAuthorId={story.author.id} me={me} />
         </div>

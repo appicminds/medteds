@@ -29,7 +29,7 @@ export function ProfileForm({ me }: { me: { name: string; username: string; bio:
                 const f = e.target.files?.[0];
                 if (!f) return;
                 setUploadError(null);
-                const res = await uploadImage(f);
+                const res = await uploadImage(f, { purpose: "avatar" });
                 if ("error" in res) setUploadError(res.error);
                 else setImage(res.url);
               }}

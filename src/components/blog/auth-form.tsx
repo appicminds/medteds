@@ -11,7 +11,19 @@ function safeNext(next: string | undefined) {
   return next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
 }
 
-export function AuthForm({ mode, next, google }: { mode: "signin" | "signup"; next?: string; google: boolean }) {
+export function AuthForm({
+  mode,
+  next,
+  google,
+  fixedEmail,
+  showSignupLink = true,
+}: {
+  mode: "signin" | "signup";
+  next?: string;
+  google: boolean;
+  fixedEmail?: string;
+  showSignupLink?: boolean;
+}) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -22,7 +34,7 @@ export function AuthForm({ mode, next, google }: { mode: "signin" | "signup"; ne
     setError(null);
     setPending(true);
     const f = new FormData(e.currentTarget);
-    const email = String(f.get("email") ?? "").trim();
+    const email = fixedEmail ?? String(f.get("email") ?? "").trim();
     const password = String(f.get("password") ?? "");
     const res =
       mode === "signup"
@@ -34,6 +46,7 @@ export function AuthForm({ mode, next, google }: { mode: "signin" | "signup"; ne
       if (res.error.status === 401 || /invalid/i.test(msg)) setError("That email and password don't match. Check them and try again.");
       else if (/exists/i.test(msg)) setError("An account with this email already exists. Sign in instead.");
       else if (/password/i.test(msg) && /short/i.test(msg)) setError("Use a password with at least 8 characters.");
+      else if (mode === "signup" && /create|failed/i.test(msg)) setError("New accounts are by invitation right now.");
       else if (res.error.status === 403 || /session/i.test(msg)) setError("This account has been suspended. Contact the editors if you think this is a mistake.");
       else setError(msg || "Something went wrong. Try again.");
       return;
@@ -72,9 +85,30 @@ export function AuthForm({ mode, next, google }: { mode: "signin" | "signup"; ne
           </Field>
         ) : null}
         <Field label="Email" htmlFor="email">
-          <Input id="email" name="email" type="email" autoComplete="email" required />
+          <Input
+            id="email"
+            name="email"
+            type="email"
+            autoComplete="email"
+            required
+            defaultValue={fixedEmail}
+            readOnly={!!fixedEmail}
+            className={fixedEmail ? "bg-surface" : undefined}
+          />
         </Field>
-        <Field label="Password" htmlFor="password" hint={mode === "signup" ? "At least 8 characters." : undefined}>
+        <Field
+          label="Password"
+          htmlFor="password"
+          hint={
+            mode === "signup" ? (
+              "At least 8 characters."
+            ) : (
+              <Link href="/forgot-password" className="hover:text-fg hover:underline">
+                Forgot password?
+              </Link>
+            )
+          }
+        >
           <Input
             id="password"
             name="password"
@@ -89,7 +123,7 @@ export function AuthForm({ mode, next, google }: { mode: "signin" | "signup"; ne
           {pending ? (mode === "signup" ? "Creating account…" : "Signing in…") : mode === "signup" ? "Create account" : "Sign in"}
         </Button>
       </form>
-      <p className="text-center text-sm text-muted">
+      {showSignupLink ? <p className="text-center text-sm text-muted">
         {mode === "signup" ? (
           <>
             Already have an account?{" "}
@@ -105,7 +139,7 @@ export function AuthForm({ mode, next, google }: { mode: "signin" | "signup"; ne
             </Link>
           </>
         )}
-      </p>
+      </p> : null}
     </div>
   );
 }

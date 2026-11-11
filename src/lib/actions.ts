@@ -1,14 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
-import type { JSONContent } from "@tiptap/core";
 import { db } from "@/db";
-import { bookmarks, claps, comments, follows, postTopics, posts, topics, user } from "@/db/schema";
-import { getCurrentUser, requireAdmin, requireUser } from "@/lib/session";
-import { firstImage, makeExcerpt, readingMinutes, storyText } from "@/lib/content";
+import { bookmarks, claps, comments, follows, posts, topics, user } from "@/db/schema";
+import { getCurrentUser, requireCan, requireUser } from "@/lib/session";
+import { can, ROLES, type Role } from "@/lib/permissions";
+import { isLive } from "@/lib/live";
+import { getSettings } from "@/lib/settings";
 import { newId } from "@/lib/utils";
 import { normalizeUsername, slugify } from "@/lib/usernames";
 
@@ -24,8 +24,11 @@ export async function clapStory(postId: string, times: number): Promise<{ total:
   const me = await getCurrentUser();
   if (!me) return null;
   const add = Math.max(1, Math.min(MAX_CLAPS, Math.floor(times)));
-  const post = await db.query.posts.findFirst({ where: eq(posts.id, postId), columns: { authorId: true, status: true } });
-  if (!post || post.status !== "published" || post.authorId === me.id) return null;
+  const post = await db.query.posts.findFirst({
+    where: eq(posts.id, postId),
+    columns: { authorId: true, status: true, publishedAt: true },
+  });
+  if (!post || !isLive(post) || post.authorId === me.id) return null;
   await db
     .insert(claps)
     .values({ userId: me.id, postId, count: add })
@@ -80,11 +83,49 @@ export async function addComment(_prev: ActionResult | null, form: FormData): Pr
   if (!me) return { ok: false, error: "Sign in to respond." };
   const parsed = commentSchema.safeParse({ postId: form.get("postId"), body: form.get("body") });
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
-  const post = await db.query.posts.findFirst({ where: eq(posts.id, parsed.data.postId), columns: { slug: true, status: true } });
-  if (!post || post.status !== "published") return { ok: false, error: "This story is no longer available." };
-  await db.insert(comments).values({ id: newId(), postId: parsed.data.postId, userId: me.id, body: parsed.data.body });
+  const post = await db.query.posts.findFirst({
+    where: eq(posts.id, parsed.data.postId),
+    columns: { slug: true, status: true, publishedAt: true },
+  });
+  if (!post || !isLive(post)) return { ok: false, error: "This story is no longer available." };
+  const status = await newCommentStatus(me);
+  await db.insert(comments).values({ id: newId(), postId: parsed.data.postId, userId: me.id, body: parsed.data.body, status });
   revalidatePath(`/p/${post.slug}`);
-  return { ok: true, message: "Response published." };
+  revalidatePath("/admin", "layout");
+  return {
+    ok: true,
+    message: status === "approved" ? "Response published." : "Thanks! Your response will appear once a moderator approves it.",
+  };
+}
+
+/** Whether a new response appears straight away, following Admin → Settings → Responses. */
+async function newCommentStatus(me: { id: string; role: string }): Promise<"approved" | "pending"> {
+  if (can(me, "write")) return "approved"; // team members are trusted
+  const { commentApproval } = await getSettings();
+  if (commentApproval === "none") return "approved";
+  if (commentApproval === "all") return "pending";
+  const earlier = await db.query.comments.findFirst({
+    where: and(eq(comments.userId, me.id), eq(comments.status, "approved")),
+    columns: { id: true },
+  });
+  return earlier ? "approved" : "pending";
+}
+
+export type CommentModeration = "approve" | "unapprove" | "spam" | "delete";
+
+export async function moderateComments(ids: string[], action: CommentModeration): Promise<ActionResult> {
+  await requireCan("moderateComments");
+  if (!ids.length) return { ok: false, error: "Select at least one response." };
+  ids = ids.slice(0, 200);
+  if (action === "delete") await db.delete(comments).where(inArray(comments.id, ids));
+  else {
+    const status = action === "approve" ? "approved" : action === "spam" ? "spam" : "pending";
+    await db.update(comments).set({ status }).where(inArray(comments.id, ids));
+  }
+  revalidatePath("/", "layout");
+  const n = ids.length;
+  const verb = { approve: "approved", unapprove: "moved to pending", spam: "marked as spam", delete: "deleted" }[action];
+  return { ok: true, message: `${n} ${n === 1 ? "response" : "responses"} ${verb}.` };
 }
 
 export async function deleteComment(commentId: string) {
@@ -92,131 +133,11 @@ export async function deleteComment(commentId: string) {
   const c = await db.query.comments.findFirst({ where: eq(comments.id, commentId) });
   if (!c) return;
   const post = await db.query.posts.findFirst({ where: eq(posts.id, c.postId), columns: { slug: true, authorId: true } });
-  // Comment author, story author or admin can remove a response.
-  if (c.userId !== me.id && post?.authorId !== me.id && me.role !== "admin") return;
+  // Comment author, story author or a moderator can remove a response.
+  if (c.userId !== me.id && post?.authorId !== me.id && !can(me, "moderateComments")) return;
   await db.delete(comments).where(eq(comments.id, commentId));
   if (post) revalidatePath(`/p/${post.slug}`);
   revalidatePath("/admin/comments");
-}
-
-/* ------------------------------------------------------------------ */
-/* Writing                                                             */
-/* ------------------------------------------------------------------ */
-
-export async function createDraft() {
-  const me = await requireUser("/write");
-  // Reuse an untouched draft from the last day instead of piling up empty ones.
-  const empty = await db.query.posts.findFirst({
-    where: and(
-      eq(posts.authorId, me.id),
-      eq(posts.status, "draft"),
-      eq(posts.title, ""),
-      sql`${posts.content} is null`,
-      sql`${posts.createdAt} > now() - interval '1 day'`,
-    ),
-    columns: { id: true },
-  });
-  if (empty) redirect(`/editor/${empty.id}`);
-  const id = newId();
-  await db.insert(posts).values({ id, authorId: me.id, slug: `draft-${id}`, title: "", status: "draft" });
-  redirect(`/editor/${id}`);
-}
-
-/** Keep only safe links and images in stored story JSON. */
-function sanitizeDoc(node: JSONContent): JSONContent {
-  const safeUrl = (u: unknown) =>
-    typeof u === "string" && (/^https?:\/\//i.test(u) || /^mailto:/i.test(u) || u.startsWith("/"));
-  const out: JSONContent = { ...node };
-  if (node.marks) {
-    out.marks = node.marks.filter((m) => m.type !== "link" || safeUrl(m.attrs?.href));
-  }
-  if (node.type === "image" && !safeUrl(node.attrs?.src)) {
-    return { type: "paragraph" };
-  }
-  if (node.content) out.content = node.content.map(sanitizeDoc);
-  return out;
-}
-
-const saveSchema = z.object({
-  id: z.string().min(1),
-  title: z.string().max(200, "Titles can be up to 200 characters."),
-  subtitle: z.string().max(300, "Subtitles can be up to 300 characters.").optional().nullable(),
-  content: z.custom<JSONContent>((v) => typeof v === "object" && v !== null && (v as JSONContent).type === "doc"),
-  coverImage: z.string().max(2000).optional().nullable(),
-  topicIds: z.array(z.number().int()).max(5, "Pick up to 5 topics.").default([]),
-});
-
-export type SaveInput = z.input<typeof saveSchema>;
-
-async function loadOwnPost(id: string) {
-  const me = await requireUser();
-  const post = await db.query.posts.findFirst({ where: eq(posts.id, id) });
-  if (!post) throw new Error("Story not found.");
-  if (post.authorId !== me.id && me.role !== "admin") throw new Error("You can only edit your own stories.");
-  return { me, post };
-}
-
-export async function saveStory(input: SaveInput): Promise<ActionResult & { savedAt?: string }> {
-  const parsed = saveSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
-  const data = parsed.data;
-  let post;
-  try {
-    ({ post } = await loadOwnPost(data.id));
-  } catch (e) {
-    return { ok: false, error: (e as Error).message };
-  }
-  const content = sanitizeDoc(data.content);
-  const text = storyText(content);
-  const cover = data.coverImage || firstImage(content);
-  await db
-    .update(posts)
-    .set({
-      title: data.title.trim(),
-      subtitle: data.subtitle?.trim() || null,
-      content,
-      excerpt: makeExcerpt(text),
-      coverImage: cover,
-      readingMinutes: readingMinutes(text),
-      updatedAt: new Date(),
-    })
-    .where(eq(posts.id, post.id));
-  await db.delete(postTopics).where(eq(postTopics.postId, post.id));
-  if (data.topicIds.length) {
-    await db.insert(postTopics).values(data.topicIds.map((topicId) => ({ postId: post.id, topicId })));
-  }
-  if (post.status === "published") revalidatePath(`/p/${post.slug}`);
-  return { ok: true, savedAt: new Date().toISOString() };
-}
-
-export async function publishStory(input: SaveInput): Promise<ActionResult & { slug?: string }> {
-  const saved = await saveStory(input);
-  if (!saved.ok) return saved;
-  const { post } = await loadOwnPost(input.id);
-  if (!post.title.trim()) return { ok: false, error: "Add a title before publishing." };
-  if ((post.excerpt ?? "").length < 20) return { ok: false, error: "Write a little more before publishing." };
-  let slug = post.slug;
-  if (post.status !== "published" || slug.startsWith("draft-")) {
-    slug = `${slugify(post.title) || "story"}-${post.id.slice(0, 6)}`;
-  }
-  await db
-    .update(posts)
-    .set({ status: "published", slug, publishedAt: post.publishedAt ?? new Date(), updatedAt: new Date() })
-    .where(eq(posts.id, post.id));
-  revalidatePath("/", "layout");
-  return { ok: true, slug };
-}
-
-export async function unpublishStory(id: string) {
-  const { post } = await loadOwnPost(id);
-  await db.update(posts).set({ status: "draft", featured: false, updatedAt: new Date() }).where(eq(posts.id, post.id));
-  revalidatePath("/", "layout");
-}
-
-export async function deleteStory(id: string) {
-  const { post } = await loadOwnPost(id);
-  await db.delete(posts).where(eq(posts.id, post.id));
-  revalidatePath("/", "layout");
 }
 
 /* ------------------------------------------------------------------ */
@@ -270,45 +191,15 @@ export async function updateProfile(_prev: ActionResult | null, form: FormData):
 /* Admin                                                               */
 /* ------------------------------------------------------------------ */
 
-export async function adminSetFeatured(postId: string, featured: boolean) {
-  await requireAdmin();
-  await db.update(posts).set({ featured }).where(eq(posts.id, postId));
-  revalidatePath("/", "layout");
-}
-
-export async function adminSetStatus(postId: string, status: "draft" | "published") {
-  await requireAdmin();
-  const post = await db.query.posts.findFirst({ where: eq(posts.id, postId) });
-  if (!post) return;
-  let slug = post.slug;
-  if (status === "published" && slug.startsWith("draft-")) slug = `${slugify(post.title) || "story"}-${post.id.slice(0, 6)}`;
-  await db
-    .update(posts)
-    .set({
-      status,
-      slug,
-      featured: status === "draft" ? false : post.featured,
-      publishedAt: status === "published" ? (post.publishedAt ?? new Date()) : post.publishedAt,
-    })
-    .where(eq(posts.id, postId));
-  revalidatePath("/", "layout");
-}
-
-export async function adminDeleteStory(postId: string) {
-  await requireAdmin();
-  await db.delete(posts).where(eq(posts.id, postId));
-  revalidatePath("/", "layout");
-}
-
-export async function adminSetRole(userId: string, role: "user" | "admin") {
-  const me = await requireAdmin();
-  if (userId === me.id) return; // admins cannot demote themselves
+export async function adminSetRole(userId: string, role: Role) {
+  const me = await requireCan("manageUsers");
+  if (userId === me.id || !ROLES.includes(role)) return; // admins cannot change their own role
   await db.update(user).set({ role }).where(eq(user.id, userId));
   revalidatePath("/admin/users");
 }
 
 export async function adminSetBanned(userId: string, banned: boolean) {
-  const me = await requireAdmin();
+  const me = await requireCan("manageUsers");
   if (userId === me.id) return;
   await db.update(user).set({ banned }).where(eq(user.id, userId));
   if (banned) {
@@ -324,7 +215,7 @@ const topicSchema = z.object({
 });
 
 export async function adminSaveTopic(_prev: ActionResult | null, form: FormData): Promise<ActionResult> {
-  await requireAdmin();
+  await requireCan("manageTopics");
   const parsed = topicSchema.safeParse({ name: form.get("name"), description: form.get("description") ?? "" });
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
   const idRaw = form.get("id");
@@ -346,7 +237,7 @@ export async function adminSaveTopic(_prev: ActionResult | null, form: FormData)
 }
 
 export async function adminDeleteTopic(id: number) {
-  await requireAdmin();
+  await requireCan("manageTopics");
   await db.delete(topics).where(eq(topics.id, id));
   revalidatePath("/", "layout");
 }

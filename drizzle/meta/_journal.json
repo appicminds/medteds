@@ -8,6 +8,34 @@
       "when": 1794376496993,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794403898957,
+      "tag": "0001_roles_revisions_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794404151653,
+      "tag": "0002_media_library",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794404512282,
+      "tag": "0003_pages",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794404731805,
+      "tag": "0004_comments_views_invites",
+      "breakpoints": true
     }
   ]
 }

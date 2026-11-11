@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { createDraft } from "@/lib/actions";
+import { createDraft } from "@/lib/post-actions";
 
 export function StartDraft() {
   const started = useRef(false);

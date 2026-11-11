@@ -71,19 +71,6 @@ export async function Sidebar() {
         </section>
       ) : null}
 
-      <SiteFooterLinks />
     </div>
-  );
-}
-
-export function SiteFooterLinks() {
-  return (
-    <nav className="flex flex-wrap gap-x-3.5 gap-y-1 text-xs text-muted">
-      <Link href="/about" className="hover:text-fg">About</Link>
-      <Link href="/topics" className="hover:text-fg">Topics</Link>
-      <Link href="/design" className="hover:text-fg">Design system</Link>
-      <Link href="/privacy" className="hover:text-fg">Privacy</Link>
-      <Link href="/terms" className="hover:text-fg">Terms</Link>
-    </nav>
   );
 }

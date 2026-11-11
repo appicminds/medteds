@@ -3,13 +3,15 @@ import { Avatar } from "@/components/ui/avatar";
 import { CommentForm, DeleteCommentButton } from "@/components/blog/comment-form";
 import { getComments } from "@/lib/queries";
 import type { CurrentUser } from "@/lib/session";
+import { can } from "@/lib/permissions";
 import { formatDate } from "@/lib/utils";
 
 export async function Comments({ postId, postAuthorId, me }: { postId: string; postAuthorId: string; me: CurrentUser | null }) {
-  const list = await getComments(postId);
+  const list = await getComments(postId, me?.id);
+  const approved = list.filter((c) => c.status === "approved").length;
   return (
     <section id="responses" className="flex flex-col gap-8 scroll-mt-24">
-      <h2 className="text-xl font-bold">Responses ({list.length})</h2>
+      <h2 className="text-xl font-bold">Responses ({approved})</h2>
       {me ? (
         <CommentForm postId={postId} me={{ name: me.name, image: me.image }} />
       ) : (
@@ -31,9 +33,12 @@ export async function Comments({ postId, postAuthorId, me }: { postId: string; p
                 <Link href={`/@${c.username}`} className="text-sm font-medium hover:underline">
                   {c.name}
                 </Link>
-                <p className="text-xs text-muted">{formatDate(c.createdAt)}</p>
+                <p className="text-xs text-muted">
+                  {formatDate(c.createdAt)}
+                  {c.status === "pending" ? <span className="ml-2 text-warning">Awaiting approval · only you can see this</span> : null}
+                </p>
               </div>
-              {me && (me.id === c.userId || me.id === postAuthorId || me.role === "admin") ? (
+              {me && (me.id === c.userId || me.id === postAuthorId || can(me, "moderateComments")) ? (
                 <DeleteCommentButton commentId={c.id} />
               ) : null}
             </div>

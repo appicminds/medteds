@@ -2,15 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  adminDeleteStory,
-  adminDeleteTopic,
-  adminSetBanned,
-  adminSetFeatured,
-  adminSetRole,
-  adminSetStatus,
-  deleteComment,
-} from "@/lib/actions";
+import { Select } from "@/components/ui/field";
+import { adminDeleteTopic, adminSetBanned, adminSetRole } from "@/lib/actions";
+import { ROLE_INFO, ROLES, type Role } from "@/lib/permissions";
 
 /** A small button that runs a server action, with an optional inline "Are you sure?" step. */
 function ActionButton({
@@ -63,31 +57,28 @@ function ActionButton({
   );
 }
 
-export function StoryAdminActions({ id, status, featured }: { id: string; status: string; featured: boolean }) {
-  return (
-    <span className="flex flex-wrap justify-end gap-1">
-      {status === "published" ? (
-        <>
-          <ActionButton label={featured ? "Unpick" : "Pick"} run={() => adminSetFeatured(id, !featured)} />
-          <ActionButton label="Unpublish" run={() => adminSetStatus(id, "draft")} />
-        </>
-      ) : (
-        <ActionButton label="Publish" run={() => adminSetStatus(id, "published")} />
-      )}
-      <ActionButton label="Delete" confirm="Delete story?" pendingLabel="Deleting…" run={() => adminDeleteStory(id)} />
-    </span>
-  );
-}
-
-export function UserAdminActions({ id, role, banned, isMe }: { id: string; role: string; banned: boolean; isMe: boolean }) {
+export function UserAdminActions({ id, role, banned, isMe, name }: { id: string; role: Role; banned: boolean; isMe: boolean; name: string }) {
+  const [pending, start] = useTransition();
+  const [value, setValue] = useState<Role>(role);
   if (isMe) return <span className="text-xs text-muted">This is you</span>;
   return (
-    <span className="flex flex-wrap justify-end gap-1">
-      <ActionButton
-        label={role === "admin" ? "Remove admin" : "Make admin"}
-        confirm={role === "admin" ? undefined : "Give full admin access?"}
-        run={() => adminSetRole(id, role === "admin" ? "user" : "admin")}
-      />
+    <span className="flex flex-wrap items-center justify-end gap-1">
+      <label htmlFor={`role-${id}`} className="sr-only">Role for {name}</label>
+      <Select
+        id={`role-${id}`}
+        value={value}
+        disabled={pending}
+        onChange={(e) => {
+          const next = e.target.value as Role;
+          setValue(next);
+          start(() => adminSetRole(id, next));
+        }}
+        className="h-8 w-auto py-0 text-sm"
+      >
+        {ROLES.map((r) => (
+          <option key={r} value={r}>{ROLE_INFO[r].label}</option>
+        ))}
+      </Select>
       <ActionButton
         label={banned ? "Restore" : "Suspend"}
         confirm={banned ? undefined : "Suspend and sign out?"}
@@ -99,8 +90,4 @@ export function UserAdminActions({ id, role, banned, isMe }: { id: string; role:
 
 export function TopicDeleteButton({ id }: { id: number }) {
   return <ActionButton label="Delete" confirm="Delete topic?" run={() => adminDeleteTopic(id)} />;
-}
-
-export function CommentDeleteButton({ id }: { id: string }) {
-  return <ActionButton label="Delete" confirm="Delete response?" run={() => deleteComment(id)} />;
 }

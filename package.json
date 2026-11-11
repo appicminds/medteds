@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:seed": "tsx --tsconfig tsconfig.json scripts/seed.ts",
+    "db:seed": "tsx --conditions=react-server --tsconfig tsconfig.json scripts/seed.ts",
     "db:studio": "drizzle-kit studio",
     "vercel-build": "drizzle-kit migrate && next build"
   },

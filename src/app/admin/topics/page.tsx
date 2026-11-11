@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireCan } from "@/lib/session";
 import { AdminHeader, AdminTable } from "@/components/admin/page-header";
 import { TopicDeleteButton } from "@/components/admin/admin-actions";
 import { TopicForm } from "@/components/admin/topic-form";
@@ -7,6 +8,7 @@ import { listTopics } from "@/lib/queries";
 export const metadata = { title: "Topics" };
 
 export default async function AdminTopics({ searchParams }: PageProps<"/admin/topics">) {
+  await requireCan("manageTopics", "/admin");
   const editId = Number((await searchParams).edit) || null;
   const topics = await listTopics();
   const editing = editId ? topics.find((t) => t.id === editId) : undefined;

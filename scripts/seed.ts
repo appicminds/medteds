@@ -235,7 +235,7 @@ async function main() {
   for (const w of WRITERS) {
     const res = await auth.api.signUpEmail({ body: { name: w.name, email: w.email, password: PASSWORD } });
     writerIds.push(res.user.id);
-    await db.update(user).set({ bio: w.bio }).where(sql`${user.id} = ${res.user.id}`);
+    await db.update(user).set({ bio: w.bio, role: "author" }).where(sql`${user.id} = ${res.user.id}`);
   }
 
   console.log("Creating stories…");

@@ -23,7 +23,7 @@ export function CommentForm({ postId, me }: { postId: string; me: { name: string
         Your response
       </label>
       <Textarea id="comment-body" name="body" placeholder="What are your thoughts?" className="border-0 px-0 focus:ring-0" required />
-      {state && !state.ok ? <FormMessage tone="error">{state.error}</FormMessage> : null}
+      {state ? <FormMessage tone={state.ok ? "success" : "error"}>{state.ok ? state.message : state.error}</FormMessage> : null}
       <div className="flex justify-end">
         <Button type="submit" variant="accent" size="sm" disabled={pending}>
           {pending ? "Publishing…" : "Respond"}

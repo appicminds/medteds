@@ -4,6 +4,9 @@ import { nextCookies } from "better-auth/next-js";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
 import { uniqueUsername } from "@/lib/usernames";
+import { getSettings } from "@/lib/settings";
+import { rememberResetLink, sendEmail } from "@/lib/email";
+import { and, eq, gt, isNull } from "drizzle-orm";
 
 const adminEmails = (process.env.ADMIN_EMAILS ?? "")
   .split(",")
@@ -42,24 +45,50 @@ export const auth = betterAuth({
       verification: schema.verification,
     },
   }),
-  emailAndPassword: { enabled: true, minPasswordLength: 8 },
+  emailAndPassword: {
+    enabled: true,
+    minPasswordLength: 8,
+    revokeSessionsOnPasswordReset: true,
+    sendResetPassword: async ({ user, url }) => {
+      rememberResetLink(user.email, url);
+      await sendEmail(
+        user.email,
+        "Reset your password",
+        `Hi ${user.name},\n\nUse this link to choose a new password. It works once and expires in 1 hour:\n\n${url}\n\nIf you didn't ask for this, you can ignore this email.`,
+      );
+    },
+  },
   socialProviders: google,
   user: {
     additionalFields: {
       username: { type: "string", required: false, input: false },
       bio: { type: "string", required: false, input: false },
-      role: { type: "string", required: false, defaultValue: "user", input: false },
+      role: { type: "string", required: false, defaultValue: "subscriber", input: false },
       banned: { type: "boolean", required: false, defaultValue: false, input: false },
     },
   },
   databaseHooks: {
     user: {
       create: {
-        // Give every new account a unique @username and grant admin to ADMIN_EMAILS.
+        // Give every new account a unique @username. ADMIN_EMAILS become admins; everyone else
+        // starts as a Subscriber until an admin gives them a writing role.
         before: async (data) => {
-          const username = await uniqueUsername(data.name || data.email.split("@")[0]);
-          const role = adminEmails.includes(data.email.toLowerCase()) ? "admin" : "user";
+          const email = data.email.toLowerCase();
+          const isAdmin = adminEmails.includes(email);
+          // An unused invitation for this email decides the role and works even when sign-ups are closed.
+          const invite = await db.query.invites.findFirst({
+            where: and(eq(schema.invites.email, email), isNull(schema.invites.usedAt), gt(schema.invites.expiresAt, new Date())),
+          });
+          if (!isAdmin && !invite && !(await getSettings()).signupOpen) return false;
+          const username = await uniqueUsername(data.name || email.split("@")[0]);
+          const role = isAdmin ? "admin" : (invite?.role ?? "subscriber");
           return { data: { ...data, username, role } };
+        },
+        after: async (created) => {
+          await db
+            .update(schema.invites)
+            .set({ usedAt: new Date() })
+            .where(and(eq(schema.invites.email, created.email.toLowerCase()), isNull(schema.invites.usedAt)));
         },
       },
     },

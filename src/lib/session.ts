@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/db";
 import { user as userTable } from "@/db/schema";
+import { asRole, can, type Action, type Role } from "@/lib/permissions";
 
 const adminEmails = (process.env.ADMIN_EMAILS ?? "")
   .split(",")
@@ -19,7 +20,7 @@ export type CurrentUser = {
   image: string | null;
   username: string;
   bio: string | null;
-  role: string;
+  role: Role;
 };
 
 /** The signed-in user for this request, or null. Cached per request. */
@@ -33,7 +34,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     banned?: boolean | null;
   };
   if (u.banned) return null;
-  let role = u.role ?? "user";
+  let role = asRole(u.role);
   // Accounts listed in ADMIN_EMAILS become admins even if they signed up before being listed.
   if (role !== "admin" && adminEmails.includes(u.email.toLowerCase())) {
     await db.update(userTable).set({ role: "admin" }).where(eq(userTable.id, u.id));
@@ -56,8 +57,9 @@ export async function requireUser(returnTo = "/") {
   return u;
 }
 
-export async function requireAdmin() {
-  const u = await requireUser("/admin");
-  if (u.role !== "admin") redirect("/");
+/** The signed-in user, if allowed to do `action`; otherwise sends them to sign in or home. */
+export async function requireCan(action: Action, returnTo = "/") {
+  const u = await requireUser(returnTo);
+  if (!can(u, action)) redirect(action === "write" ? "/write/request-access" : "/");
   return u;
 }

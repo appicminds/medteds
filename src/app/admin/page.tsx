@@ -1,27 +1,63 @@
 import Link from "next/link";
 import { AdminHeader } from "@/components/admin/page-header";
-import { Badge } from "@/components/ui/badge";
-import { adminListStories, adminStats } from "@/lib/queries";
+import { CommentQueue } from "@/components/admin/comment-queue";
+import { QuickDraft } from "@/components/admin/quick-draft";
+import { ViewsChart } from "@/components/admin/views-chart";
+import { can } from "@/lib/permissions";
+import { adminCommentCounts, adminListComments, adminStats, pendingReview, topPosts, viewsByDay } from "@/lib/queries";
+import { requireCan } from "@/lib/session";
 import { compactNumber, formatDate } from "@/lib/utils";
 
-export default async function AdminOverview() {
-  const [stats, recent] = await Promise.all([adminStats(), adminListStories({})]);
-  const tiles = [
-    { label: "Published stories", value: stats.stories, href: "/admin/stories?status=published" },
-    { label: "Drafts", value: stats.drafts, href: "/admin/stories?status=draft" },
-    { label: "Members", value: stats.users, href: "/admin/users" },
-    { label: "Responses", value: stats.comments, href: "/admin/comments" },
-    { label: "Claps", value: stats.claps },
+export const metadata = { title: "Dashboard" };
+
+function Card({ title, action, children, className }: { title: string; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
+  return (
+    <section className={`flex min-w-0 flex-col gap-4 rounded-md border border-line p-5 ${className ?? ""}`}>
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="font-semibold">{title}</h2>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+export default async function AdminDashboard() {
+  const me = await requireCan("viewAdmin", "/admin");
+  const [stats, views, top, review, commentCounts, pendingComments] = await Promise.all([
+    adminStats(),
+    viewsByDay(30),
+    topPosts(30, 5),
+    pendingReview(6),
+    adminCommentCounts(),
+    adminListComments("pending", 5),
+  ]);
+  const total30 = views.reduce((n, d) => n + d.n, 0);
+  const prev7 = views.slice(-14, -7).reduce((n, d) => n + d.n, 0);
+  const last7 = views.slice(-7).reduce((n, d) => n + d.n, 0);
+  const change = prev7 ? Math.round(((last7 - prev7) / prev7) * 100) : null;
+
+  const glance = [
+    { label: "Views, last 30 days", value: total30 },
+    { label: "Live stories", value: stats.stories, href: "/admin/stories?status=published" },
+    { label: "Waiting for review", value: stats.pending, href: "/admin/stories?status=pending", attention: stats.pending > 0 },
+    { label: "Responses to approve", value: commentCounts.pending, href: "/admin/comments", attention: commentCounts.pending > 0 },
+    { label: "Users", value: stats.users, href: can(me, "manageUsers") ? "/admin/users" : undefined },
   ];
+
   return (
     <>
-      <AdminHeader title="Overview" description="What's happening on MedTeds." />
+      <AdminHeader title="Dashboard" description={`Welcome back, ${me.name.split(" ")[0]}.`} />
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
-        {tiles.map((t) => {
+        {glance.map((t) => {
           const inner = (
             <>
               <p className="text-xs text-muted">{t.label}</p>
-              <p className="mt-1 text-3xl font-bold tabular-nums">{compactNumber(t.value)}</p>
+              <p className="mt-1 flex items-center gap-2 text-3xl font-bold tabular-nums">
+                {compactNumber(t.value)}
+                {t.attention ? <span className="h-2 w-2 rounded-full bg-warning" aria-label="Needs attention" /> : null}
+              </p>
             </>
           );
           return t.href ? (
@@ -36,20 +72,66 @@ export default async function AdminOverview() {
         })}
       </div>
 
-      <h2 className="mb-4 mt-12 text-lg font-semibold">Recently updated</h2>
-      <ul className="rounded-md border border-line">
-        {recent.slice(0, 8).map((s) => (
-          <li key={s.id} className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3 last:border-0">
-            <Badge tone={s.status === "published" ? "success" : "neutral"}>{s.status === "published" ? "Published" : "Draft"}</Badge>
-            <Link href={s.status === "published" ? `/p/${s.slug}` : `/editor/${s.id}`} className="min-w-0 flex-1 truncate font-medium hover:underline">
-              {s.title || "Untitled story"}
-            </Link>
-            <span className="text-xs text-muted">
-              {s.authorName} · {formatDate(s.updatedAt)}
-            </span>
-          </li>
-        ))}
-      </ul>
+      <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <Card
+          title="Views per day"
+          action={
+            change !== null ? (
+              <span className="text-xs text-muted">
+                Last 7 days: <span className="font-medium text-fg tabular-nums">{last7.toLocaleString()}</span> ({change >= 0 ? "+" : ""}
+                {change}% vs the week before)
+              </span>
+            ) : null
+          }
+        >
+          {total30 ? (
+            <ViewsChart data={views} />
+          ) : (
+            <p className="py-10 text-center text-sm text-muted">No views yet. They&apos;re counted when readers open a story.</p>
+          )}
+        </Card>
+
+        <Card title="Top stories, last 30 days">
+          {top.length ? (
+            <ol className="flex flex-col gap-3">
+              {top.map((p, i) => (
+                <li key={p.id} className="flex items-baseline gap-3 text-sm">
+                  <span className="w-4 text-muted tabular-nums">{i + 1}</span>
+                  <Link href={`/p/${p.slug}`} className="min-w-0 flex-1 truncate font-medium hover:underline">{p.title}</Link>
+                  <span className="text-muted tabular-nums">{compactNumber(p.n)}</span>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="text-sm text-muted">Nothing yet.</p>
+          )}
+        </Card>
+
+        <Card title="Waiting for review" action={<Link href="/admin/stories?status=pending" className="text-xs text-accent hover:underline">All pending</Link>}>
+          {review.length ? (
+            <ul className="flex flex-col gap-3">
+              {review.map((p) => (
+                <li key={p.id} className="text-sm">
+                  <Link href={`/editor/${p.id}`} className="font-medium hover:underline">{p.title || "Untitled story"}</Link>
+                  <p className="text-xs text-muted">{p.authorName} · {formatDate(p.updatedAt)}</p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-muted">No stories waiting.</p>
+          )}
+        </Card>
+
+        <Card title="Quick draft">
+          <QuickDraft />
+        </Card>
+
+        {can(me, "moderateComments") ? (
+          <Card title="Responses to approve" className="xl:col-span-2" action={<Link href="/admin/comments" className="text-xs text-accent hover:underline">All responses</Link>}>
+            <CommentQueue compact tab="pending" rows={pendingComments.map((c) => ({ ...c, createdAt: c.createdAt.toISOString() }))} />
+          </Card>
+        ) : null}
+      </div>
     </>
   );
 }

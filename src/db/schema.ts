@@ -8,6 +8,7 @@ import {
   primaryKey,
   index,
   serial,
+  date,
   customType,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
@@ -29,7 +30,8 @@ export const user = pgTable("user", {
   // MedTeds profile fields
   username: text("username").unique(),
   bio: text("bio"),
-  role: text("role").notNull().default("user"), // "user" | "admin"
+  // "subscriber" | "contributor" | "author" | "editor" | "admin" (see src/lib/permissions.ts)
+  role: text("role").notNull().default("subscriber"),
   banned: boolean("banned").notNull().default(false),
 });
 
@@ -98,10 +100,14 @@ export const posts = pgTable(
     content: jsonb("content"), // Tiptap JSON document
     excerpt: text("excerpt"),
     coverImage: text("cover_image"),
-    status: text("status").notNull().default("draft"), // "draft" | "published"
+    // "draft" | "pending" (awaiting review) | "scheduled" | "published" | "trash"
+    status: text("status").notNull().default("draft"),
     featured: boolean("featured").notNull().default(false), // editor's pick
     readingMinutes: integer("reading_minutes").notNull().default(1),
+    seoTitle: text("seo_title"),
+    seoDescription: text("seo_description"),
     publishedAt: timestamp("published_at"),
+    trashedAt: timestamp("trashed_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
@@ -149,10 +155,35 @@ export const comments = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     body: text("body").notNull(),
+    status: text("status").notNull().default("approved"), // "approved" | "pending" | "spam"
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
-  (t) => [index("comments_post_idx").on(t.postId)],
+  (t) => [index("comments_post_idx").on(t.postId), index("comments_status_idx").on(t.status)],
 );
+
+/** Daily view counts per story. */
+export const postViews = pgTable(
+  "post_views",
+  {
+    postId: text("post_id")
+      .notNull()
+      .references(() => posts.id, { onDelete: "cascade" }),
+    day: date("day").notNull(),
+    count: integer("count").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.postId, t.day] }), index("post_views_day_idx").on(t.day)],
+);
+
+/** Single-use invitations that give a new account a role. */
+export const invites = pgTable("invites", {
+  id: text("id").primaryKey(), // also the secret token in the invite link
+  email: text("email").notNull(),
+  role: text("role").notNull(),
+  invitedBy: text("invited_by").references(() => user.id, { onDelete: "set null" }),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
 
 export const bookmarks = pgTable(
   "bookmarks",
@@ -185,7 +216,48 @@ export const follows = pgTable(
   ],
 );
 
-/** Uploaded images, used when Supabase Storage is not configured. */
+/** Snapshots of a story, saved on publish/update and on demand, for restoring older versions. */
+export const postRevisions = pgTable(
+  "post_revisions",
+  {
+    id: text("id").primaryKey(),
+    postId: text("post_id")
+      .notNull()
+      .references(() => posts.id, { onDelete: "cascade" }),
+    savedBy: text("saved_by").references(() => user.id, { onDelete: "set null" }),
+    title: text("title").notNull().default(""),
+    subtitle: text("subtitle"),
+    content: jsonb("content"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("post_revisions_post_idx").on(t.postId, t.createdAt)],
+);
+
+/** Static pages such as About, Privacy and Terms, edited in Admin → Pages. */
+export const pages = pgTable("pages", {
+  id: text("id").primaryKey(),
+  slug: text("slug").notNull().unique(),
+  title: text("title").notNull().default(""),
+  content: jsonb("content"),
+  status: text("status").notNull().default("draft"), // "draft" | "published"
+  seoTitle: text("seo_title"),
+  seoDescription: text("seo_description"),
+  authorId: text("author_id").references(() => user.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+/** Site-wide settings, stored as one JSON value per key (see src/lib/settings.ts). */
+export const settings = pgTable("settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+/**
+ * Media library: one row per uploaded image. Bytes live in `data` when stored in Postgres,
+ * or in Supabase Storage (then `data` is null and `url` points there).
+ */
 export const media = pgTable(
   "media",
   {
@@ -193,11 +265,18 @@ export const media = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    url: text("url").notNull().default(""),
+    filename: text("filename").notNull().default(""),
+    alt: text("alt").notNull().default(""),
     mimeType: text("mime_type").notNull(),
     size: integer("size").notNull(),
-    data: bytea("data").notNull(),
+    width: integer("width"),
+    height: integer("height"),
+    storage: text("storage").notNull().default("db"), // "db" | "supabase"
+    data: bytea("data"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
+  (t) => [index("media_created_idx").on(t.createdAt)],
 );
 
 /* ------------------------------------------------------------------ */
@@ -225,3 +304,4 @@ export const topicRelations = relations(topics, ({ many }) => ({
 export type User = typeof user.$inferSelect;
 export type Post = typeof posts.$inferSelect;
 export type Topic = typeof topics.$inferSelect;
+export type Page = typeof pages.$inferSelect;

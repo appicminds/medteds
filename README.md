@@ -16,6 +16,20 @@ A blogging platform for stories about medicine and health. Anyone can sign up, w
 | Editor | Tiptap |
 | Images | Stored in Postgres by default, or in Supabase Storage when configured |
 
+## Roles
+
+Modelled on WordPress. Admins change roles in **Admin → Users**.
+
+| Role | Can do |
+|---|---|
+| Subscriber | Read, clap, respond, save and follow. Everyone who signs up starts here. |
+| Contributor | Write drafts and submit them for review. Can't publish. |
+| Author | Write and publish their own stories, and upload images. |
+| Editor | Manage everyone's stories, pages, media, topics and responses. |
+| Administrator | Everything, plus users, menus and site settings. |
+
+The rules live in `src/lib/permissions.ts`.
+
 ## Pages
 
 **Readers**
@@ -25,32 +39,36 @@ A blogging platform for stories about medicine and health. Anyone can sign up, w
 | Home feed (For you, Following, topic tabs) | `/` |
 | Story | `/p/[slug]` |
 | Writer profile | `/@username` |
-| Topic | `/tag/[slug]` |
-| All topics | `/topics` |
+| Topic / all topics | `/tag/[slug]`, `/topics` |
 | Search (stories, people, topics) | `/search?q=` |
 | Reading list | `/reading-list` |
-| Sign in / Sign up | `/signin`, `/signup` |
-| About, Privacy, Terms | `/about`, `/privacy`, `/terms` |
-| Design system | `/design` |
+| Pages from the CMS (About, Privacy, Terms, any new page) | `/[page]` |
+| Sign in, sign up, forgot/reset password, accept invitation | `/signin`, `/signup`, `/forgot-password`, `/reset-password`, `/invite/[token]` |
 
-**Writer CMS**
-
-| Page | Path |
-|---|---|
-| New story | `/write` (opens a new draft) |
-| Editor (autosave, images, topics, cover, publish) | `/editor/[id]` |
-| Your stories (drafts and published) | `/me/stories` |
-| Settings (profile, photo, theme) | `/settings` |
-
-**Admin CMS** (accounts with the `admin` role)
+**Writers**
 
 | Page | Path |
 |---|---|
-| Overview | `/admin` |
-| Stories: publish, unpublish, Editor's picks, delete | `/admin/stories` |
-| Members: grant admin, suspend | `/admin/users` |
-| Topics: add, edit, delete | `/admin/topics` |
-| Responses: moderate | `/admin/comments` |
+| New story | `/write` |
+| Editor: autosave, images (upload or library), topics, cover, schedule, web address, search title and description, revisions | `/editor/[id]` |
+| Your stories: drafts, published, trash | `/me/stories` |
+| Settings: profile, photo, theme, password | `/settings` |
+
+**Admin** (Editors and Administrators)
+
+| Section | What it does |
+|---|---|
+| Dashboard `/admin` | At-a-glance counts, views per day, top stories, review queue, responses to approve, quick draft |
+| Posts `/admin/stories` | All / Published / Scheduled / Pending / Drafts / Trash / Editor's picks tabs, author and topic filters, search, bulk publish, unpublish, trash, restore, delete |
+| Media `/admin/media` | Image library: upload by drag and drop, alt text, copy link, where each image is used, delete |
+| Pages `/admin/pages` | Create and edit pages like About and Privacy |
+| Comments `/admin/comments` | Approve, unapprove, spam or delete responses, one by one or in bulk |
+| Topics `/admin/topics` | Add, edit and delete topics |
+| Users `/admin/users` | Invite by email with a role, change roles, suspend, edit profiles, create password-reset links, delete with story reassignment |
+| Menus `/admin/menus` | Header and footer links |
+| Settings `/admin/settings` | Site name, tagline, logo, brand colour, social links, open or closed sign-up, response approval rules |
+
+Scheduled stories go live at their publish time automatically; no background job is needed. Trashed stories are deleted for good after 30 days.
 
 ## Run it locally
 
@@ -92,7 +110,11 @@ You need Node.js 20+ and a PostgreSQL database.
 
 ### Making someone an admin
 
-Emails listed in `ADMIN_EMAILS` get the admin role when they sign up. After that, admins can promote other members from **Admin → Members**.
+Emails listed in `ADMIN_EMAILS` become admins when they sign up (or on their next visit, if they already have an account). After that, admins invite people and change roles from **Admin → Users**.
+
+### Email (optional)
+
+Set `RESEND_API_KEY` and `EMAIL_FROM` to email invitations and password-reset links. Without them, the admin area shows each link so you can send it yourself.
 
 ## Deploy (Vercel + Supabase)
 
@@ -110,8 +132,8 @@ All colours, fonts, sizes, corner rounding and shadows are tokens in `src/app/gl
 |---|---|
 | `src/components/ui` | Building blocks: Button, Input, Textarea, Select, Field, Chip, Badge, Avatar, Cover, Tabs, EmptyState, Logo |
 | `src/components/blog` | Reader features: TopBar, StoryCard, Sidebar, ClapButton, BookmarkButton, FollowButton, Comments, ThemeToggle |
-| `src/components/cms` | Writer tools: StoryEditor, ProfileForm, upload helper |
-| `src/components/admin` | Admin navigation, tables and actions |
+| `src/components/cms` | Writer tools: StoryEditor, PageEditor, MediaBrowser and picker, RevisionsDialog, ProfileForm, upload helper |
+| `src/components/admin` | Admin navigation, posts table, comment queue, views chart, menu, settings and user forms |
 
 Open `/design` in the running app to see every component in light and dark.
 
@@ -122,7 +144,7 @@ src/
   app/            Pages and API routes
   components/     UI, blog, CMS and admin components
   db/             Drizzle schema and database client
-  lib/            Auth, queries (reads), actions (writes), content rendering, storage
+  lib/            Auth, permissions, settings, queries (reads), actions (writes), content rendering, storage
   proxy.ts        Sends signed-out visitors to sign in before private pages
 drizzle/          SQL migrations
 scripts/seed.ts   Sample data
@@ -142,4 +164,4 @@ scripts/seed.ts   Sample data
 
 ## Known issue
 
-In production builds, opening `/design` or `/settings` by typing the address, straight after another page in the same tab, can log a React hydration warning (#418) in the browser console. React recovers on its own and the page works normally. The cause hasn't been pinned down yet.
+In production builds, opening a page that contains the theme switch (`/settings`, `/design`) by typing its address, straight after another page in the same tab, can log a React hydration warning (#418) in the browser console. React recovers on its own and the page works normally. The cause hasn't been pinned down yet.

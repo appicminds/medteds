@@ -5,7 +5,7 @@ import { media } from "@/db/schema";
 export async function GET(_req: Request, ctx: RouteContext<"/api/media/[id]">) {
   const { id } = await ctx.params;
   const row = await db.query.media.findFirst({ where: eq(media.id, id) });
-  if (!row) return new Response("Not found", { status: 404 });
+  if (!row?.data) return new Response("Not found", { status: 404 });
   return new Response(new Uint8Array(row.data), {
     headers: {
       "Content-Type": row.mimeType,

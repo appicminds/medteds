@@ -13,7 +13,7 @@ export function AdminHeader({ title, description, children }: { title: string; d
 /** Table wrapper that scrolls sideways on small screens instead of widening the page. */
 export function AdminTable({ children }: { children: React.ReactNode }) {
   return (
-    <div className="overflow-x-auto rounded-md border border-line">
+    <div className="relative overflow-x-auto rounded-md border border-line">
       <table className="w-full min-w-[720px] text-left text-sm [&_td]:px-4 [&_td]:py-3 [&_th]:px-4 [&_th]:py-2.5 [&_th]:text-xs [&_th]:font-medium [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted [&_thead]:bg-surface [&_tr+tr]:border-t [&_tr+tr]:border-line">
         {children}
       </table>
