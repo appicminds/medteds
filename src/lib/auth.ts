@@ -1,0 +1,71 @@
+import { betterAuth } from "better-auth";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { nextCookies } from "better-auth/next-js";
+import { db } from "@/db";
+import * as schema from "@/db/schema";
+import { uniqueUsername } from "@/lib/usernames";
+
+const adminEmails = (process.env.ADMIN_EMAILS ?? "")
+  .split(",")
+  .map((e) => e.trim().toLowerCase())
+  .filter(Boolean);
+
+const google =
+  process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+    ? {
+        google: {
+          clientId: process.env.GOOGLE_CLIENT_ID,
+          clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        },
+      }
+    : undefined;
+
+export const auth = betterAuth({
+  database: drizzleAdapter(db, {
+    provider: "pg",
+    schema: {
+      user: schema.user,
+      session: schema.session,
+      account: schema.account,
+      verification: schema.verification,
+    },
+  }),
+  emailAndPassword: { enabled: true, minPasswordLength: 8 },
+  socialProviders: google,
+  user: {
+    additionalFields: {
+      username: { type: "string", required: false, input: false },
+      bio: { type: "string", required: false, input: false },
+      role: { type: "string", required: false, defaultValue: "user", input: false },
+      banned: { type: "boolean", required: false, defaultValue: false, input: false },
+    },
+  },
+  databaseHooks: {
+    user: {
+      create: {
+        // Give every new account a unique @username and grant admin to ADMIN_EMAILS.
+        before: async (data) => {
+          const username = await uniqueUsername(data.name || data.email.split("@")[0]);
+          const role = adminEmails.includes(data.email.toLowerCase()) ? "admin" : "user";
+          return { data: { ...data, username, role } };
+        },
+      },
+    },
+    session: {
+      create: {
+        // Suspended accounts cannot sign in.
+        before: async (s) => {
+          const u = await db.query.user.findFirst({
+            where: (t, { eq }) => eq(t.id, s.userId),
+            columns: { banned: true },
+          });
+          if (u?.banned) return false;
+          return { data: s };
+        },
+      },
+    },
+  },
+  plugins: [nextCookies()],
+});
+
+export type Session = typeof auth.$Infer.Session;
