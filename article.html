@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>What 10,000 ECGs Taught Me About Listening — MedTeds</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a href="index.html" class="logo"><span class="logo-mark"></span>MedTeds</a>
+      <div class="spacer"></div>
+      <a href="#" class="nav-link">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="m18 2 4 4-9 9H9v-4z"/></svg>
+        <span>Write</span>
+      </a>
+      <div class="avatar av-1">YO</div>
+    </div>
+  </header>
+
+  <main class="article">
+    <h1>What 10,000 ECGs Taught Me About Listening</h1>
+    <p class="subtitle">The most important diagnostic tool in the clinic isn't the machine. It's the five minutes before you order the test.</p>
+
+    <div class="author">
+      <div class="avatar av-2">AR</div>
+      <div>
+        <div class="name">Dr. Amara Reyes <a href="#">Follow</a></div>
+        <div class="sub">Published in Heart Matters · 8 min read · Nov 4, 2026</div>
+      </div>
+    </div>
+
+    <div class="actionbar">
+      <button class="icon-btn clap" id="clap">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 11V5a1.5 1.5 0 0 1 3 0v5m0-1V3.5a1.5 1.5 0 0 1 3 0V10m0-4.5a1.5 1.5 0 0 1 3 0V12m0-3a1.5 1.5 0 0 1 3 0v5a7 7 0 0 1-7 7h-1a7 7 0 0 1-5.6-2.8L3.3 14a1.5 1.5 0 0 1 2.4-1.8L7 14"/></svg>
+        <span id="clap-count">2.4K</span>
+      </button>
+      <button class="icon-btn">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 12a8 8 0 0 1-11.8 7L4 20l1.1-4.6A8 8 0 1 1 21 12z"/></svg>
+        86
+      </button>
+      <span class="grow"></span>
+      <button class="icon-btn" aria-label="Save"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h12v18l-6-4-6 4z"/></svg></button>
+      <button class="icon-btn" aria-label="Share"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13"/></svg></button>
+    </div>
+
+    <div class="hero th-1"></div>
+    <p class="caption">Illustration by the author</p>
+
+    <div class="prose">
+      <p>In my first year as a cardiology fellow, I believed the twelve-lead tracing would tell me everything. The waveform was objective. The patient's story was noise I had to sit through before getting to the signal.</p>
+      <p>Ten thousand tracings later, I've come to think almost exactly the opposite.</p>
+
+      <h2>The test answers the question you asked</h2>
+      <p>An ECG is a remarkably honest instrument. It shows you the electrical activity of the heart during a ten-second window, and nothing more. If the arrhythmia happens at 3 a.m. while climbing stairs, the tracing taken at 2 p.m. in a quiet room will be <em>normal</em> — and normal can be the most dangerous word in medicine.</p>
+
+      <blockquote class="pull">“A normal result is only reassuring if you asked the right question.”</blockquote>
+
+      <p>The patient who mentions, almost in passing, that she gets lightheaded “only when I carry laundry upstairs” has given you more diagnostic information than the machine will. The question is whether you were listening when she said it.</p>
+
+      <h2>Five minutes, three questions</h2>
+      <p>These days, before I look at any tracing, I ask three things: <strong>When does it happen? What were you doing? What made it stop?</strong> The answers shape which test I order, how long I monitor, and what I'm looking for when the results come back.</p>
+      <blockquote>Medicine is a conversation that occasionally pauses for a lab result.</blockquote>
+      <p>None of this is new. Every attending I trained under said some version of it. But it took a few thousand tracings — and a few humbling misses — before I really believed it.</p>
+    </div>
+
+    <div class="tags">
+      <a href="#" class="chip">Cardiology</a><a href="#" class="chip">Clinical Practice</a><a href="#" class="chip">Medical Education</a>
+    </div>
+
+    <div class="author-card">
+      <div class="avatar av-2">AR</div>
+      <div>
+        <h3>Written by Dr. Amara Reyes</h3>
+        <div class="sub">4.2K followers · Editor of Heart Matters</div>
+        <p>Cardiologist. Writing about the human side of heart medicine, one patient story at a time.</p>
+        <button class="btn btn-accent">Follow</button>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // Clap button: tap to add claps
+    const clap = document.getElementById('clap');
+    const count = document.getElementById('clap-count');
+    let n = 2400;
+    clap.addEventListener('click', () => {
+      n += 1;
+      clap.classList.add('active');
+      count.textContent = n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K' : n;
+    });
+  </script>
+</body>
+</html>
