@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { posts, postViews } from "@/db/schema";
+import { posts, postViews, readingHistory } from "@/db/schema";
 import { isLive } from "@/lib/live";
 import { getCurrentUser } from "@/lib/session";
 
@@ -14,9 +14,6 @@ export async function POST(request: Request) {
   if (!postId || typeof postId !== "string" || postId.length > 40) return new NextResponse(null, { status: 204 });
   if (BOT.test(request.headers.get("user-agent") ?? "")) return new NextResponse(null, { status: 204 });
 
-  const cookieName = `mt_v_${postId.replace(/[^a-z0-9]/gi, "")}`;
-  if ((request.headers.get("cookie") ?? "").includes(`${cookieName}=1`)) return new NextResponse(null, { status: 204 });
-
   const post = await db.query.posts.findFirst({
     where: eq(posts.id, postId),
     columns: { id: true, authorId: true, status: true, publishedAt: true },
@@ -24,6 +21,17 @@ export async function POST(request: Request) {
   if (!post || !isLive(post)) return new NextResponse(null, { status: 204 });
   const me = await getCurrentUser();
   if (me?.id === post.authorId) return new NextResponse(null, { status: 204 });
+
+  // Signed-in readers get the story in their reading history every time they open it.
+  if (me) {
+    await db
+      .insert(readingHistory)
+      .values({ userId: me.id, postId })
+      .onConflictDoUpdate({ target: [readingHistory.userId, readingHistory.postId], set: { readAt: new Date() } });
+  }
+
+  const cookieName = `mt_v_${postId.replace(/[^a-z0-9]/gi, "")}`;
+  if ((request.headers.get("cookie") ?? "").includes(`${cookieName}=1`)) return new NextResponse(null, { status: 204 });
 
   await db
     .insert(postViews)

@@ -238,3 +238,19 @@
 }
 .ProseMirror:focus { outline: none; }
 .ProseMirror-selectednode img { outline: 2px solid var(--accent); }
+
+/* Reader highlights (src/components/blog/highlighter.tsx) */
+.prose-story mark {
+  background: transparent;
+  color: inherit;
+}
+.prose-story mark.hl {
+  background: var(--accent-soft);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.prose-story mark.hl-top {
+  text-decoration: underline dotted var(--accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}

@@ -13,8 +13,9 @@ import { Comments } from "@/components/blog/comments";
 import { FollowButton } from "@/components/blog/follow-button";
 import { ShareButton } from "@/components/blog/share-button";
 import { ViewTracker } from "@/components/blog/view-tracker";
+import { StoryBody } from "@/components/blog/highlighter";
 import { renderStoryHtml } from "@/lib/content";
-import { getStory, listStories } from "@/lib/queries";
+import { getStory, listStories, storyHighlights } from "@/lib/queries";
 import { getCurrentUser } from "@/lib/session";
 import { compactNumber, formatDate } from "@/lib/utils";
 import { canEditPost } from "@/lib/permissions";
@@ -148,7 +149,7 @@ export default async function StoryPage({ params }: PageProps<"/p/[slug]">) {
         <Cover src={story.coverImage} seed={story.id} className="mb-10 aspect-video w-full max-w-full rounded-sm" />
       ) : null}
 
-      <article className="prose-story" dangerouslySetInnerHTML={{ __html: html }} />
+      <StoryBody html={html} postId={story.id} highlights={live ? await storyHighlights(story.id, me?.id) : []} signedIn={!!me} />
 
       {story.topics.length ? (
         <div className="mt-12 flex flex-wrap gap-2">
@@ -227,7 +228,7 @@ function StoryActions({
         <MessageCircle size={21} strokeWidth={1.6} /> <span className="tabular-nums">{story.commentCount}</span>
       </a>
       <span className="flex-1" />
-      {story.featured && !compact ? <Badge tone="accent">Editor&apos;s pick</Badge> : null}
+      {story.featured && !compact ? <span className="whitespace-nowrap"><Badge tone="accent">Editor&apos;s pick</Badge></span> : null}
       {canEdit && !compact ? (
         <Link href={`/editor/${story.id}`} className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-fg">
           <Pencil size={18} strokeWidth={1.6} /> Edit

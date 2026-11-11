@@ -62,8 +62,8 @@ export function UserMenu({
                 <FileText size={18} /> Your stories
               </Link>
             ) : null}
-            <Link href="/reading-list" className={item} onClick={() => setOpen(false)}>
-              <Bookmark size={18} /> Reading list
+            <Link href="/library" className={item} onClick={() => setOpen(false)}>
+              <Bookmark size={18} /> Library
             </Link>
             <Link href={`/@${user.username}`} className={item} onClick={() => setOpen(false)}>
               <User size={18} /> Profile

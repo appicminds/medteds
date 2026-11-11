@@ -2,7 +2,24 @@ import "server-only";
 import { and, desc, eq, ne, sql, inArray, notInArray, type SQL } from "drizzle-orm";
 import type { JSONContent } from "@tiptap/core";
 import { db } from "@/db";
-import { bookmarks, claps, comments, follows, pages, postRevisions, postTopics, posts, topicFollows, topics, user } from "@/db/schema";
+import {
+  bookmarks,
+  claps,
+  comments,
+  follows,
+  highlights,
+  listItems,
+  listSaves,
+  lists,
+  pages,
+  postRevisions,
+  postTopics,
+  posts,
+  readingHistory,
+  topicFollows,
+  topics,
+  user,
+} from "@/db/schema";
 import { storyText } from "@/lib/content";
 import { isLive, liveRawP, liveSql } from "@/lib/live";
 import { clip, DESCRIPTION_MAX, effectiveSeo, seoChecks, seoScore } from "@/lib/seo-auto";
@@ -166,7 +183,7 @@ export async function getStory(slug: string, viewerId?: string) {
   if (viewerId) {
     const [c, b, f] = await Promise.all([
       db.query.claps.findFirst({ where: and(eq(claps.userId, viewerId), eq(claps.postId, card.id)) }),
-      db.query.bookmarks.findFirst({ where: and(eq(bookmarks.userId, viewerId), eq(bookmarks.postId, card.id)) }),
+      bookmarkedIds(viewerId, [card.id]).then((ids) => ids.has(card.id)),
       db.query.follows.findFirst({
         where: and(eq(follows.followerId, viewerId), eq(follows.followingId, card.author.id)),
       }),
@@ -317,13 +334,18 @@ export async function listBookmarks(userId: string): Promise<StoryCardData[]> {
   return attachTopics(rows);
 }
 
+/** Stories the reader saved anywhere: their reading list or any of their own lists. */
 export async function bookmarkedIds(userId: string | undefined, postIds: string[]) {
   if (!userId || !postIds.length) return new Set<string>();
-  const rows = await db
-    .select({ id: bookmarks.postId })
-    .from(bookmarks)
-    .where(and(eq(bookmarks.userId, userId), inArray(bookmarks.postId, postIds)));
-  return new Set(rows.map((r) => r.id));
+  const [a, b] = await Promise.all([
+    db.select({ id: bookmarks.postId }).from(bookmarks).where(and(eq(bookmarks.userId, userId), inArray(bookmarks.postId, postIds))),
+    db
+      .select({ id: listItems.postId })
+      .from(listItems)
+      .innerJoin(lists, eq(listItems.listId, lists.id))
+      .where(and(eq(lists.userId, userId), inArray(listItems.postId, postIds))),
+  ]);
+  return new Set([...a, ...b].map((r) => r.id));
 }
 
 export type MyStoriesTab = "drafts" | "published" | "trash";
@@ -741,4 +763,144 @@ export async function adminListTopicSeo() {
 export async function seoAttentionCount(defaultImage: string | null) {
   const { counts } = await adminListSeo({ kind: "stories", filter: "attention", defaultImage });
   return counts.attention;
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Library: lists, highlights, reading history                         */
+/* ------------------------------------------------------------------ */
+
+export type ListSummary = {
+  id: string;
+  name: string;
+  description: string | null;
+  isPublic: boolean;
+  count: number;
+  covers: string[];
+  owner: { name: string; username: string | null; image: string | null };
+  updatedAt: Date;
+};
+
+async function summarizeLists(where: SQL | undefined, extraJoin?: "saves", saverId?: string): Promise<ListSummary[]> {
+  const base = db
+    .select({
+      id: lists.id,
+      name: lists.name,
+      description: lists.description,
+      isPublic: lists.isPublic,
+      updatedAt: lists.updatedAt,
+      ownerName: user.name,
+      ownerUsername: user.username,
+      ownerImage: user.image,
+      count: sql<number>`(select count(*) from list_items li join posts p on p.id = li.post_id where li.list_id = "lists"."id" and ${sql.raw(liveRawP)})::int`,
+      covers: sql<string[]>`array(select p.cover_image from list_items li join posts p on p.id = li.post_id where li.list_id = "lists"."id" and p.cover_image is not null and ${sql.raw(liveRawP)} order by li.created_at desc limit 3)`,
+    })
+    .from(lists)
+    .innerJoin(user, eq(lists.userId, user.id));
+  const rows =
+    extraJoin === "saves" && saverId
+      ? await base
+          .innerJoin(listSaves, and(eq(listSaves.listId, lists.id), eq(listSaves.userId, saverId)))
+          .where(and(where, eq(lists.isPublic, true)))
+          .orderBy(desc(listSaves.createdAt))
+      : await base.where(where).orderBy(desc(lists.updatedAt));
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    isPublic: r.isPublic,
+    count: Number(r.count),
+    covers: r.covers ?? [],
+    owner: { name: r.ownerName, username: r.ownerUsername, image: r.ownerImage },
+    updatedAt: r.updatedAt,
+  }));
+}
+
+/** The reader's own lists, plus the size and covers of their default reading list. */
+export async function myLists(userId: string) {
+  const [own, reading] = await Promise.all([
+    summarizeLists(eq(lists.userId, userId)),
+    db.execute<{ n: number; covers: string[] }>(sql`
+      select count(*)::int as n,
+        (array_agg(p.cover_image order by b.created_at desc) filter (where p.cover_image is not null))[1:3] as covers
+      from bookmarks b join posts p on p.id = b.post_id
+      where b.user_id = ${userId} and ${sql.raw(liveRawP)}`),
+  ]);
+  return { own, reading: { count: Number(reading.rows[0]?.n ?? 0), covers: reading.rows[0]?.covers ?? [] } };
+}
+
+export async function savedLists(userId: string) {
+  return summarizeLists(undefined, "saves", userId);
+}
+
+export async function publicListsOf(userId: string) {
+  return summarizeLists(and(eq(lists.userId, userId), eq(lists.isPublic, true)));
+}
+
+/** A list with its stories, or null when it doesn't exist or is private to someone else. */
+export async function getList(id: string, viewerId?: string) {
+  const [summary] = await summarizeLists(eq(lists.id, id));
+  if (!summary) return null;
+  const owner = await db.query.lists.findFirst({ where: eq(lists.id, id), columns: { userId: true } });
+  const isOwner = !!viewerId && owner?.userId === viewerId;
+  if (!summary.isPublic && !isOwner) return null;
+  const rows = await db
+    .select({ ...cardColumns, addedAt: listItems.createdAt })
+    .from(listItems)
+    .innerJoin(posts, eq(listItems.postId, posts.id))
+    .innerJoin(user, eq(posts.authorId, user.id))
+    .where(and(eq(listItems.listId, id), published))
+    .orderBy(desc(listItems.createdAt));
+  const saved = viewerId
+    ? !!(await db.query.listSaves.findFirst({ where: and(eq(listSaves.userId, viewerId), eq(listSaves.listId, id)) }))
+    : false;
+  return { ...summary, isOwner, saved, stories: await attachTopics(rows) };
+}
+
+export async function myHighlights(userId: string) {
+  return db
+    .select({ id: highlights.id, text: highlights.text, createdAt: highlights.createdAt, slug: posts.slug, title: posts.title, authorName: user.name })
+    .from(highlights)
+    .innerJoin(posts, eq(highlights.postId, posts.id))
+    .innerJoin(user, eq(posts.authorId, user.id))
+    .where(and(eq(highlights.userId, userId), published))
+    .orderBy(desc(highlights.createdAt))
+    .limit(200);
+}
+
+export async function myHistory(userId: string, limit = 50) {
+  const rows = await db
+    .select({ ...cardColumns, readAt: readingHistory.readAt })
+    .from(readingHistory)
+    .innerJoin(posts, eq(readingHistory.postId, posts.id))
+    .innerJoin(user, eq(posts.authorId, user.id))
+    .where(and(eq(readingHistory.userId, userId), published))
+    .orderBy(desc(readingHistory.readAt))
+    .limit(limit);
+  return attachTopics(rows);
+}
+
+export type StoryHighlight = { id: string; text: string; prefix: string; suffix: string; mine: boolean; top?: boolean; count?: number };
+
+/** The reader's own highlights on a story, plus the most-highlighted passage once 3+ readers chose it. */
+export async function storyHighlights(postId: string, viewerId?: string): Promise<StoryHighlight[]> {
+  const mine = viewerId
+    ? await db
+        .select({ id: highlights.id, text: highlights.text, prefix: highlights.prefix, suffix: highlights.suffix })
+        .from(highlights)
+        .where(and(eq(highlights.postId, postId), eq(highlights.userId, viewerId)))
+    : [];
+  const top = await db.execute<{ text: string; prefix: string; suffix: string; n: number }>(sql`
+    select text, min(prefix) as prefix, min(suffix) as suffix, count(distinct user_id)::int as n
+    from highlights where post_id = ${postId}
+    group by text having count(distinct user_id) >= 3
+    order by n desc limit 1`);
+  const out: StoryHighlight[] = mine.map((h) => ({ ...h, mine: true }));
+  const t = top.rows[0];
+  if (t && !mine.some((h) => h.text === t.text)) out.push({ id: "top", text: t.text, prefix: t.prefix, suffix: t.suffix, mine: false, top: true, count: Number(t.n) });
+  else if (t) {
+    const m = out.find((h) => h.text === t.text);
+    if (m) Object.assign(m, { top: true, count: Number(t.n) });
+  }
+  return out;
 }

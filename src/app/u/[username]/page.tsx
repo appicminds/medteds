@@ -5,10 +5,11 @@ import { ButtonLink } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FollowButton } from "@/components/blog/follow-button";
 import { StoryList } from "@/components/blog/story-card";
-import { bookmarkedIds, getProfile, listStories } from "@/lib/queries";
+import { bookmarkedIds, getProfile, listStories, publicListsOf } from "@/lib/queries";
 import { getCurrentUser } from "@/lib/session";
 import { compactNumber, formatDate } from "@/lib/utils";
 import { alternatesFor } from "@/lib/seo";
+import { ListCard } from "@/components/blog/list-card";
 
 export async function generateMetadata({ params }: PageProps<"/u/[username]">): Promise<Metadata> {
   const { username } = await params;
@@ -31,6 +32,7 @@ export default async function ProfilePage({ params }: PageProps<"/u/[username]">
   const stories = await listStories({ authorId: profile.id, limit: 50 });
   const saved = await bookmarkedIds(me?.id, stories.map((s) => s.id));
   const isMe = me?.id === profile.id;
+  const publicLists = await publicListsOf(profile.id);
 
   return (
     <div className="mx-auto grid max-w-page grid-cols-1 lg:grid-cols-[minmax(0,1fr)_368px]">
@@ -54,6 +56,16 @@ export default async function ProfilePage({ params }: PageProps<"/u/[username]">
             />
           </div>
         )}
+        {publicLists.length ? (
+          <section className="mt-12">
+            <h2 className="border-b border-line pb-4 text-sm">Lists ({publicLists.length})</h2>
+            <div className="mt-6 flex flex-col gap-4">
+              {publicLists.map((l) => (
+                <ListCard key={l.id} href={`/list/${l.id}`} name={l.name} description={l.description} count={l.count} covers={l.covers} isPublic />
+              ))}
+            </div>
+          </section>
+        ) : null}
       </main>
       <aside className="order-first px-4 pt-6 sm:px-6 lg:order-none lg:px-10 lg:py-14">
         <div className="flex flex-col gap-4 lg:sticky lg:top-[97px]">

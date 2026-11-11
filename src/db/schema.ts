@@ -322,6 +322,86 @@ export const notifications = pgTable(
   (t) => [index("notifications_user_idx").on(t.userId, t.createdAt), index("notifications_post_idx").on(t.postId)],
 );
 
+/** Named reading lists. The default "Reading list" is the bookmarks table. */
+export const lists = pgTable(
+  "lists",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    isPublic: boolean("is_public").notNull().default(false),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [index("lists_user_idx").on(t.userId)],
+);
+
+export const listItems = pgTable(
+  "list_items",
+  {
+    listId: text("list_id")
+      .notNull()
+      .references(() => lists.id, { onDelete: "cascade" }),
+    postId: text("post_id")
+      .notNull()
+      .references(() => posts.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.listId, t.postId] }), index("list_items_post_idx").on(t.postId)],
+);
+
+/** Other people's public lists a reader saved to their library. */
+export const listSaves = pgTable(
+  "list_saves",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    listId: text("list_id")
+      .notNull()
+      .references(() => lists.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.listId] })],
+);
+
+/** Passages a reader highlighted. Prefix and suffix let a highlight find its place again after small edits. */
+export const highlights = pgTable(
+  "highlights",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    postId: text("post_id")
+      .notNull()
+      .references(() => posts.id, { onDelete: "cascade" }),
+    text: text("text").notNull(),
+    prefix: text("prefix").notNull().default(""),
+    suffix: text("suffix").notNull().default(""),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("highlights_post_idx").on(t.postId), index("highlights_user_idx").on(t.userId, t.createdAt)],
+);
+
+/** Stories a signed-in reader opened, most recent first. */
+export const readingHistory = pgTable(
+  "reading_history",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    postId: text("post_id")
+      .notNull()
+      .references(() => posts.id, { onDelete: "cascade" }),
+    readAt: timestamp("read_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.postId] }), index("reading_history_user_idx").on(t.userId, t.readAt)],
+);
+
 /* ------------------------------------------------------------------ */
 /* Relations                                                           */
 /* ------------------------------------------------------------------ */

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { bookmarks, claps, comments, follows, notifications, posts, topicFollows, topics, user } from "@/db/schema";
+import { claps, comments, follows, notifications, posts, topicFollows, topics, user } from "@/db/schema";
 import { getCurrentUser, requireCan, requireUser } from "@/lib/session";
 import { can, ROLES, type Role } from "@/lib/permissions";
 import { isLive } from "@/lib/live";
@@ -45,21 +45,6 @@ export async function clapStory(postId: string, times: number): Promise<{ total:
   const added = (mine?.n ?? 0) - (before?.n ?? 0);
   if (added > 0) await notifyClap(post.authorId, me.id, postId, added);
   return { total: total.n, mine: mine?.n ?? 0 };
-}
-
-export async function toggleBookmark(postId: string): Promise<boolean | null> {
-  const me = await getCurrentUser();
-  if (!me) return null;
-  const existing = await db.query.bookmarks.findFirst({
-    where: and(eq(bookmarks.userId, me.id), eq(bookmarks.postId, postId)),
-  });
-  if (existing) {
-    await db.delete(bookmarks).where(and(eq(bookmarks.userId, me.id), eq(bookmarks.postId, postId)));
-  } else {
-    await db.insert(bookmarks).values({ userId: me.id, postId }).onConflictDoNothing();
-  }
-  revalidatePath("/reading-list");
-  return !existing;
 }
 
 export async function toggleFollow(userId: string): Promise<boolean | null> {
