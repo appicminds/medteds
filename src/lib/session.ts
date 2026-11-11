@@ -2,7 +2,15 @@ import "server-only";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
+import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { db } from "@/db";
+import { user as userTable } from "@/db/schema";
+
+const adminEmails = (process.env.ADMIN_EMAILS ?? "")
+  .split(",")
+  .map((e) => e.trim().toLowerCase())
+  .filter(Boolean);
 
 export type CurrentUser = {
   id: string;
@@ -25,6 +33,12 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     banned?: boolean | null;
   };
   if (u.banned) return null;
+  let role = u.role ?? "user";
+  // Accounts listed in ADMIN_EMAILS become admins even if they signed up before being listed.
+  if (role !== "admin" && adminEmails.includes(u.email.toLowerCase())) {
+    await db.update(userTable).set({ role: "admin" }).where(eq(userTable.id, u.id));
+    role = "admin";
+  }
   return {
     id: u.id,
     name: u.name,
@@ -32,7 +46,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     image: u.image ?? null,
     username: u.username ?? u.id,
     bio: u.bio ?? null,
-    role: u.role ?? "user",
+    role,
   };
 });
 
