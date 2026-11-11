@@ -11,7 +11,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx --tsconfig tsconfig.json scripts/seed.ts",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "vercel-build": "drizzle-kit migrate && next build"
   },
   "dependencies": {
     "@tiptap/extension-image": "^3.33.1",
