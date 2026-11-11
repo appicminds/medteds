@@ -27,6 +27,7 @@ export default async function Home({ searchParams }: PageProps<"/">) {
       : await listStories({
           topicSlug: tab === "for-you" ? undefined : tab,
           personalFor: tab === "for-you" ? me?.id : undefined,
+          viewerId: me?.id,
           limit: PAGE_SIZE + 1,
           offset: (page - 1) * PAGE_SIZE,
         });

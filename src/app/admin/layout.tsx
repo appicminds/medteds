@@ -10,7 +10,7 @@ export default async function AdminLayout({ children }: LayoutProps<"/admin">) {
   if (can(me, "manageMedia")) items.push("media");
   if (can(me, "managePages")) items.push("pages");
   if (can(me, "manageSeo")) items.push("seo");
-  if (can(me, "moderateComments")) items.push("comments");
+  if (can(me, "moderateComments")) items.push("comments", "reports");
   if (can(me, "manageTopics")) items.push("topics");
   if (can(me, "manageUsers")) items.push("users");
   if (can(me, "manageMenus")) items.push("menus");

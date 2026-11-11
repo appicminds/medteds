@@ -4,12 +4,13 @@ import { revalidatePath } from "next/cache";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { claps, comments, follows, notifications, posts, topicFollows, topics, user } from "@/db/schema";
+import { claps, commentClaps, comments, follows, mutes, notifications, posts, reports, topicFollows, topics, user } from "@/db/schema";
 import { getCurrentUser, requireCan, requireUser } from "@/lib/session";
 import { can, ROLES, type Role } from "@/lib/permissions";
 import { isLive } from "@/lib/live";
 import { getSettings } from "@/lib/settings";
 import { newId } from "@/lib/utils";
+import { REPORT_REASONS } from "@/lib/report-reasons";
 import { notify, notifyClap } from "@/lib/notifications";
 import { normalizeUsername, slugify } from "@/lib/usernames";
 
@@ -95,22 +96,30 @@ export async function setTopicFollows(topicIds: number[]): Promise<ActionResult>
 
 const commentSchema = z.object({
   postId: z.string().min(1),
+  parentId: z.string().max(40).optional(),
   body: z.string().trim().min(1, "Write something first.").max(5000, "Responses can be up to 5,000 characters."),
 });
 
 export async function addComment(_prev: ActionResult | null, form: FormData): Promise<ActionResult> {
   const me = await getCurrentUser();
   if (!me) return { ok: false, error: "Sign in to respond." };
-  const parsed = commentSchema.safeParse({ postId: form.get("postId"), body: form.get("body") });
+  const parsed = commentSchema.safeParse({ postId: form.get("postId"), body: form.get("body"), parentId: form.get("parentId") || undefined });
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
   const post = await db.query.posts.findFirst({
     where: eq(posts.id, parsed.data.postId),
     columns: { slug: true, status: true, publishedAt: true },
   });
   if (!post || !isLive(post)) return { ok: false, error: "This story is no longer available." };
+  // Replies attach to a top-level response on the same story.
+  let parentId: string | null = null;
+  if (parsed.data.parentId) {
+    const parent = await db.query.comments.findFirst({ where: eq(comments.id, parsed.data.parentId), columns: { id: true, postId: true, parentId: true, status: true } });
+    if (!parent || parent.postId !== parsed.data.postId || parent.status !== "approved") return { ok: false, error: "That response is no longer available." };
+    parentId = parent.parentId ?? parent.id;
+  }
   const status = await newCommentStatus(me);
   const commentId = newId();
-  await db.insert(comments).values({ id: commentId, postId: parsed.data.postId, userId: me.id, body: parsed.data.body, status });
+  await db.insert(comments).values({ id: commentId, postId: parsed.data.postId, userId: me.id, body: parsed.data.body, status, parentId });
   // Held responses notify the author once a moderator approves them.
   if (status === "approved") await notifyResponse(commentId);
   revalidatePath(`/p/${post.slug}`);
@@ -121,10 +130,10 @@ export async function addComment(_prev: ActionResult | null, form: FormData): Pr
   };
 }
 
-/** Tells the story's author about a published response, once. */
+/** Tells the story's author about a published response, and the parent's author about a reply. Once. */
 async function notifyResponse(commentId: string) {
   const c = await db
-    .select({ id: comments.id, postId: comments.postId, userId: comments.userId, authorId: posts.authorId })
+    .select({ id: comments.id, postId: comments.postId, userId: comments.userId, parentId: comments.parentId, authorId: posts.authorId })
     .from(comments)
     .innerJoin(posts, eq(comments.postId, posts.id))
     .where(eq(comments.id, commentId));
@@ -132,7 +141,104 @@ async function notifyResponse(commentId: string) {
   if (!row) return;
   const already = await db.query.notifications.findFirst({ where: eq(notifications.commentId, commentId), columns: { id: true } });
   if (already) return;
-  await notify({ to: row.authorId, actor: row.userId, type: "response", postId: row.postId, commentId });
+  let parentAuthor: string | null = null;
+  if (row.parentId) {
+    const parent = await db.query.comments.findFirst({ where: eq(comments.id, row.parentId), columns: { userId: true } });
+    parentAuthor = parent?.userId ?? null;
+    if (parentAuthor) await notify({ to: parentAuthor, actor: row.userId, type: "reply", postId: row.postId, commentId });
+  }
+  if (row.authorId !== parentAuthor) await notify({ to: row.authorId, actor: row.userId, type: "response", postId: row.postId, commentId });
+}
+
+/** Claps for a response. Returns the new totals, or null when not allowed. */
+export async function clapComment(commentId: string, times: number): Promise<{ total: number; mine: number } | null> {
+  const me = await getCurrentUser();
+  if (!me) return null;
+  const add = Math.max(1, Math.min(MAX_CLAPS, Math.floor(times)));
+  const c = await db.query.comments.findFirst({ where: eq(comments.id, commentId), columns: { userId: true, status: true } });
+  if (!c || c.status !== "approved" || c.userId === me.id) return null;
+  await db
+    .insert(commentClaps)
+    .values({ userId: me.id, commentId, count: add })
+    .onConflictDoUpdate({ target: [commentClaps.userId, commentClaps.commentId], set: { count: sql`least(${commentClaps.count} + ${add}, ${MAX_CLAPS})` } });
+  const [[mine], [total]] = await Promise.all([
+    db.select({ n: commentClaps.count }).from(commentClaps).where(and(eq(commentClaps.userId, me.id), eq(commentClaps.commentId, commentId))),
+    db.select({ n: sql<number>`coalesce(sum(${commentClaps.count}),0)::int` }).from(commentClaps).where(eq(commentClaps.commentId, commentId)),
+  ]);
+  return { total: total.n, mine: mine?.n ?? 0 };
+}
+
+/* ------------------------------------------------------------------ */
+/* Mute and report                                                     */
+/* ------------------------------------------------------------------ */
+
+/** Mutes or unmutes a writer or topic. Returns the new state, or null when not allowed. */
+export async function toggleMute(targetType: "user" | "topic", targetId: string): Promise<boolean | null> {
+  const me = await getCurrentUser();
+  if (!me || (targetType === "user" && targetId === me.id)) return null;
+  if (targetType !== "user" && targetType !== "topic") return null;
+  const where = and(eq(mutes.userId, me.id), eq(mutes.targetType, targetType), eq(mutes.targetId, targetId));
+  const existing = await db.query.mutes.findFirst({ where });
+  if (existing) await db.delete(mutes).where(where);
+  else {
+    await db.insert(mutes).values({ userId: me.id, targetType, targetId }).onConflictDoNothing();
+    if (targetType === "topic") await db.delete(topicFollows).where(and(eq(topicFollows.userId, me.id), eq(topicFollows.topicId, Number(targetId))));
+    if (targetType === "user") await db.delete(follows).where(and(eq(follows.followerId, me.id), eq(follows.followingId, targetId)));
+  }
+  revalidatePath("/", "layout");
+  return !existing;
+}
+
+const reportSchema = z
+  .object({
+    postId: z.string().max(40).optional(),
+    commentId: z.string().max(40).optional(),
+    reason: z.enum(REPORT_REASONS),
+    note: z.string().trim().max(1000, "Keep the note under 1,000 characters.").optional(),
+  })
+  .refine((v) => !!v.postId !== !!v.commentId, "Report a story or a response.");
+
+export async function reportContent(input: z.input<typeof reportSchema>): Promise<ActionResult> {
+  const me = await getCurrentUser();
+  if (!me) return { ok: false, error: "Sign in to report." };
+  const parsed = reportSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
+  const d = parsed.data;
+  const exists = d.postId
+    ? await db.query.posts.findFirst({ where: eq(posts.id, d.postId), columns: { id: true } })
+    : await db.query.comments.findFirst({ where: eq(comments.id, d.commentId!), columns: { id: true } });
+  if (!exists) return { ok: false, error: "That's no longer available." };
+  const dup = await db.query.reports.findFirst({
+    where: and(eq(reports.reporterId, me.id), eq(reports.status, "open"), d.postId ? eq(reports.postId, d.postId) : eq(reports.commentId, d.commentId!)),
+    columns: { id: true },
+  });
+  if (!dup) await db.insert(reports).values({ id: newId(), reporterId: me.id, postId: d.postId ?? null, commentId: d.commentId ?? null, reason: d.reason, note: d.note || null });
+  revalidatePath("/admin", "layout");
+  return { ok: true, message: "Thanks for letting us know. The editors will review it." };
+}
+
+export type ReportAction = "dismiss" | "resolve" | "resolve-remove";
+
+/** Closes a report. "resolve-remove" also trashes the story or marks the response as spam. */
+export async function handleReport(id: string, action: ReportAction): Promise<ActionResult> {
+  const me = await requireCan("moderateComments");
+  const rep = await db.query.reports.findFirst({ where: eq(reports.id, id) });
+  if (!rep) return { ok: false, error: "That report no longer exists." };
+  if (action === "resolve-remove") {
+    if (rep.postId) {
+      if (!can(me, "editOthersPosts")) return { ok: false, error: "You can't remove stories." };
+      await db.update(posts).set({ status: "trash", featured: false, trashedAt: new Date(), updatedAt: new Date() }).where(eq(posts.id, rep.postId));
+    } else if (rep.commentId) {
+      await db.update(comments).set({ status: "spam" }).where(eq(comments.id, rep.commentId));
+    }
+  }
+  // Close every open report about the same thing.
+  await db
+    .update(reports)
+    .set({ status: action === "dismiss" ? "dismissed" : "resolved", resolvedBy: me.id, resolvedAt: new Date() })
+    .where(and(eq(reports.status, "open"), rep.postId ? eq(reports.postId, rep.postId) : eq(reports.commentId, rep.commentId!)));
+  revalidatePath("/", "layout");
+  return { ok: true, message: action === "dismiss" ? "Report dismissed." : action === "resolve" ? "Report resolved." : rep.postId ? "Story moved to trash." : "Response marked as spam." };
 }
 
 /** Whether a new response appears straight away, following Admin → Settings → Responses. */

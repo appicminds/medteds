@@ -14,8 +14,9 @@ import { FollowButton } from "@/components/blog/follow-button";
 import { ShareButton } from "@/components/blog/share-button";
 import { ViewTracker } from "@/components/blog/view-tracker";
 import { StoryBody } from "@/components/blog/highlighter";
+import { MoreMenu } from "@/components/blog/more-menu";
 import { renderStoryHtml } from "@/lib/content";
-import { getStory, listStories, storyHighlights } from "@/lib/queries";
+import { getStory, getTopic, listStories, mutedBy, storyHighlights } from "@/lib/queries";
 import { getCurrentUser } from "@/lib/session";
 import { compactNumber, formatDate } from "@/lib/utils";
 import { canEditPost } from "@/lib/permissions";
@@ -68,6 +69,13 @@ export default async function StoryPage({ params }: PageProps<"/p/[slug]">) {
   if (!live && !canEdit) notFound();
 
   const html = await renderStoryHtml(story.content as JSONContent);
+  const [muted, firstTopic] = await Promise.all([mutedBy(me?.id), story.topics[0] ? getTopic(story.topics[0].slug) : null]);
+  const menu = isAuthor
+    ? null
+    : {
+        writer: me ? { id: story.author.id, name: story.author.name, muted: muted.users.has(story.author.id) } : null,
+        topic: me && firstTopic ? { id: firstTopic.id, name: firstTopic.name, muted: muted.topics.has(firstTopic.id) } : null,
+      };
   const more = (await listStories({ authorId: story.author.id, limit: 4 })).filter((s) => s.id !== story.id).slice(0, 3);
 
   const seo = effectiveSeo(story, settings.defaultShareImage);
@@ -143,7 +151,7 @@ export default async function StoryPage({ params }: PageProps<"/p/[slug]">) {
         </div>
       </div>
 
-      <StoryActions story={story} me={me} isAuthor={isAuthor} canEdit={canEdit} />
+      <StoryActions story={story} me={me} isAuthor={isAuthor} canEdit={canEdit} menu={menu} />
 
       {story.coverImage && !html.includes(story.coverImage) ? (
         <Cover src={story.coverImage} seed={story.id} className="mb-10 aspect-video w-full max-w-full rounded-sm" />
@@ -214,12 +222,14 @@ function StoryActions({
   isAuthor,
   canEdit,
   compact,
+  menu,
 }: {
   story: NonNullable<Awaited<ReturnType<typeof getStory>>>;
   me: Awaited<ReturnType<typeof getCurrentUser>>;
   isAuthor: boolean;
   canEdit: boolean;
   compact?: boolean;
+  menu?: { writer: { id: string; name: string; muted: boolean } | null; topic: { id: number; name: string; muted: boolean } | null } | null;
 }) {
   return (
     <div className={compact ? "flex items-center gap-6 px-1" : "mb-10 flex items-center gap-6 border-y border-line px-2 py-2.5"}>
@@ -236,6 +246,9 @@ function StoryActions({
       ) : null}
       <BookmarkButton postId={story.id} saved={story.viewer.bookmarked} signedIn={!!me} size={22} />
       <ShareButton title={story.title} />
+      {menu && !compact ? (
+        <MoreMenu target={{ postId: story.id }} label="More options for this story" writer={menu.writer} topic={menu.topic} signedIn={!!me} size={22} />
+      ) : null}
     </div>
   );
 }

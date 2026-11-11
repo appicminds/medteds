@@ -9,6 +9,7 @@ import {
   follows,
   highlights,
   listItems,
+  mutes,
   listSaves,
   lists,
   pages,
@@ -16,6 +17,7 @@ import {
   postTopics,
   posts,
   readingHistory,
+  reports,
   topicFollows,
   topics,
   user,
@@ -108,6 +110,8 @@ export async function listStories(opts: {
   query?: string;
   /** Put stories from this reader's followed topics and writers first. */
   personalFor?: string;
+  /** Hide writers and topics this reader muted. */
+  viewerId?: string;
   limit?: number;
   offset?: number;
 }): Promise<StoryCardData[]> {
@@ -124,6 +128,7 @@ export async function listStories(opts: {
       sql`${posts.authorId} in (select ${follows.followingId} from ${follows} where ${follows.followerId} = ${opts.followingOf})`,
     );
   }
+  if (opts.viewerId) where.push(notMutedBy(opts.viewerId));
   let order: SQL[] = [desc(posts.publishedAt)];
   if (opts.personalFor) {
     const uid = opts.personalFor;
@@ -209,10 +214,56 @@ export async function getStory(slug: string, viewerId?: string) {
 }
 
 /** Approved responses, plus the viewer's own responses that are waiting for approval. */
-export async function getComments(postId: string, viewerId?: string) {
-  return db
+/** Stories by writers or in topics this reader muted are left out. */
+function notMutedBy(viewerId: string) {
+  return sql`("posts"."author_id" not in (select m.target_id from mutes m where m.user_id = ${viewerId} and m.target_type = 'user')
+    and not exists (select 1 from post_topics pt where pt.post_id = "posts"."id"
+      and pt.topic_id::text in (select m.target_id from mutes m where m.user_id = ${viewerId} and m.target_type = 'topic')))`;
+}
+
+/** Writers and topics a reader muted. */
+export async function mutedBy(viewerId: string | undefined) {
+  if (!viewerId) return { users: new Set<string>(), topics: new Set<number>() };
+  const rows = await db.select({ type: mutes.targetType, id: mutes.targetId }).from(mutes).where(eq(mutes.userId, viewerId));
+  return {
+    users: new Set(rows.filter((r) => r.type === "user").map((r) => r.id)),
+    topics: new Set(rows.filter((r) => r.type === "topic").map((r) => Number(r.id))),
+  };
+}
+
+/** Muted writers and topics with names, for Settings. */
+export async function mutedList(viewerId: string) {
+  const rows = await db.execute<{ type: string; id: string; name: string | null; extra: string | null }>(sql`
+    select m.target_type as type, m.target_id as id,
+      coalesce(u.name, t.name) as name, coalesce(u.username, t.slug) as extra
+    from mutes m
+    left join "user" u on m.target_type = 'user' and u.id = m.target_id
+    left join topics t on m.target_type = 'topic' and t.id::text = m.target_id
+    where m.user_id = ${viewerId}
+    order by m.created_at desc`);
+  return rows.rows.filter((r) => r.name).map((r) => ({ type: r.type as "user" | "topic", id: r.id, name: r.name!, extra: r.extra }));
+}
+
+export type CommentRow = {
+  id: string;
+  parentId: string | null;
+  body: string;
+  status: string;
+  createdAt: Date;
+  userId: string;
+  name: string;
+  username: string | null;
+  image: string | null;
+  clapCount: number;
+  myClaps: number;
+};
+
+/** Approved responses (oldest replies under each), plus the viewer's own responses that are waiting for approval. */
+export async function getComments(postId: string, viewerId?: string): Promise<CommentRow[]> {
+  const rows = await db
     .select({
       id: comments.id,
+      parentId: comments.parentId,
       body: comments.body,
       status: comments.status,
       createdAt: comments.createdAt,
@@ -220,6 +271,10 @@ export async function getComments(postId: string, viewerId?: string) {
       name: user.name,
       username: user.username,
       image: user.image,
+      clapCount: sql<number>`(select coalesce(sum(cc.count), 0) from comment_claps cc where cc.comment_id = "comments"."id")::int`,
+      myClaps: viewerId
+        ? sql<number>`(select coalesce(sum(cc.count), 0) from comment_claps cc where cc.comment_id = "comments"."id" and cc.user_id = ${viewerId})::int`
+        : sql<number>`0`,
     })
     .from(comments)
     .innerJoin(user, eq(comments.userId, user.id))
@@ -230,9 +285,11 @@ export async function getComments(postId: string, viewerId?: string) {
         viewerId
           ? sql`(${comments.status} = 'approved' or (${comments.userId} = ${viewerId} and ${comments.status} = 'pending'))`
           : eq(comments.status, "approved"),
+        viewerId ? sql`"comments"."user_id" not in (select m.target_id from mutes m where m.user_id = ${viewerId} and m.target_type = 'user')` : undefined,
       ),
     )
     .orderBy(desc(comments.createdAt));
+  return rows.map((r) => ({ ...r, clapCount: Number(r.clapCount), myClaps: Number(r.myClaps) }));
 }
 
 export async function listTopics(limit?: number) {
@@ -903,4 +960,63 @@ export async function storyHighlights(postId: string, viewerId?: string): Promis
     if (m) Object.assign(m, { top: true, count: Number(t.n) });
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Admin → Reports                                                     */
+/* ------------------------------------------------------------------ */
+
+export type ReportRow = {
+  id: string;
+  reason: string;
+  note: string | null;
+  status: string;
+  createdAt: Date;
+  reporterName: string;
+  reporterUsername: string | null;
+  post: { id: string; slug: string; title: string; status: string } | null;
+  comment: { id: string; body: string; status: string; authorName: string; postSlug: string } | null;
+  others: number;
+};
+
+export async function adminListReports(status: "open" | "closed", limit = 100): Promise<ReportRow[]> {
+  const rows = await db.execute<{
+    id: string; reason: string; note: string | null; status: string; created_at: Date;
+    reporter_name: string; reporter_username: string | null;
+    post_id: string | null; post_slug: string | null; post_title: string | null; post_status: string | null;
+    comment_id: string | null; comment_body: string | null; comment_status: string | null; comment_author: string | null; comment_post_slug: string | null;
+    others: number;
+  }>(sql`
+    select r.id, r.reason, r.note, r.status, r.created_at,
+      u.name as reporter_name, u.username as reporter_username,
+      p.id as post_id, p.slug as post_slug, p.title as post_title, p.status as post_status,
+      c.id as comment_id, c.body as comment_body, c.status as comment_status, cu.name as comment_author, cp.slug as comment_post_slug,
+      (select count(*) from reports r2 where r2.status = r.status and r2.id <> r.id
+        and (r2.post_id = r.post_id or r2.comment_id = r.comment_id))::int as others
+    from reports r
+    join "user" u on u.id = r.reporter_id
+    left join posts p on p.id = r.post_id
+    left join comments c on c.id = r.comment_id
+    left join "user" cu on cu.id = c.user_id
+    left join posts cp on cp.id = c.post_id
+    where ${status === "open" ? sql`r.status = 'open'` : sql`r.status <> 'open'`}
+    order by r.created_at desc
+    limit ${limit}`);
+  return rows.rows.map((r) => ({
+    id: r.id,
+    reason: r.reason,
+    note: r.note,
+    status: r.status,
+    createdAt: new Date(r.created_at),
+    reporterName: r.reporter_name,
+    reporterUsername: r.reporter_username,
+    post: r.post_id ? { id: r.post_id, slug: r.post_slug!, title: r.post_title || "Untitled story", status: r.post_status! } : null,
+    comment: r.comment_id ? { id: r.comment_id, body: r.comment_body!, status: r.comment_status!, authorName: r.comment_author ?? "", postSlug: r.comment_post_slug ?? "" } : null,
+    others: Number(r.others),
+  }));
+}
+
+export async function openReportCount() {
+  const [row] = await db.select({ n: sql<number>`count(*)::int` }).from(reports).where(eq(reports.status, "open"));
+  return row?.n ?? 0;
 }

@@ -18,7 +18,7 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
   const me = await getCurrentUser();
   const [stories, topics, people] = q
     ? await Promise.all([
-        listStories({ query: q, limit: 20 }),
+        listStories({ query: q, limit: 20, viewerId: me?.id }),
         listTopics().then((ts) => ts.filter((t) => t.name.toLowerCase().includes(q.toLowerCase()))),
         db
           .select({ id: user.id, name: user.name, username: user.username, image: user.image, bio: user.bio })

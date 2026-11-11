@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { clapStory } from "@/lib/actions";
+import { clapComment, clapStory } from "@/lib/actions";
 import { cn, compactNumber } from "@/lib/utils";
 
 const MAX = 50;
@@ -22,8 +22,13 @@ export function ClapButton({
   mine,
   signedIn,
   isAuthor,
+  commentId,
+  iconSize = 22,
 }: {
   postId: string;
+  /** Clap for a response on the story instead of the story itself. */
+  commentId?: string;
+  iconSize?: number;
   total: number;
   mine: number;
   signedIn: boolean;
@@ -41,7 +46,7 @@ export function ClapButton({
     pending.current = 0;
     if (!n) return;
     startTransition(async () => {
-      const res = await clapStory(postId, n);
+      const res = commentId ? await clapComment(commentId, n) : await clapStory(postId, n);
       if (res) setState(res);
     });
   }
@@ -59,11 +64,12 @@ export function ClapButton({
     timer.current = setTimeout(flush, 600);
   }
 
+  const thing = commentId ? "response" : "story";
   const label = isAuthor
-    ? "You can't clap for your own story"
+    ? `You can't clap for your own ${thing}`
     : state.mine >= MAX
       ? "You've given the maximum 50 claps"
-      : `Clap for this story (${state.mine} of ${MAX})`;
+      : `Clap for this ${thing} (${state.mine} of ${MAX})`;
 
   return (
     <button
@@ -76,7 +82,7 @@ export function ClapButton({
         state.mine > 0 ? "text-accent" : "text-muted hover:text-fg",
       )}
     >
-      <ClapIcon />
+      <ClapIcon size={iconSize} />
       <span className="tabular-nums">{compactNumber(state.total)}</span>
       {burst > 0 && state.mine > 0 ? (
         <span

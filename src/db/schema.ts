@@ -1,4 +1,5 @@
 import {
+  type AnyPgColumn,
   pgTable,
   text,
   timestamp,
@@ -175,6 +176,8 @@ export const comments = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     body: text("body").notNull(),
+    // Replies point at the response they answer (one level deep, like Medium).
+    parentId: text("parent_id").references((): AnyPgColumn => comments.id, { onDelete: "cascade" }),
     status: text("status").notNull().default("approved"), // "approved" | "pending" | "spam"
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
@@ -400,6 +403,54 @@ export const readingHistory = pgTable(
     readAt: timestamp("read_at").notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.postId] }), index("reading_history_user_idx").on(t.userId, t.readAt)],
+);
+
+export const commentClaps = pgTable(
+  "comment_claps",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    commentId: text("comment_id")
+      .notNull()
+      .references(() => comments.id, { onDelete: "cascade" }),
+    count: integer("count").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.commentId] }), index("comment_claps_comment_idx").on(t.commentId)],
+);
+
+/** Writers or topics a reader doesn't want to see. targetType: "user" | "topic". */
+export const mutes = pgTable(
+  "mutes",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    targetType: text("target_type").notNull(),
+    targetId: text("target_id").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.targetType, t.targetId] })],
+);
+
+/** Stories or responses reported to the editors. status: "open" | "resolved" | "dismissed". */
+export const reports = pgTable(
+  "reports",
+  {
+    id: text("id").primaryKey(),
+    reporterId: text("reporter_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    postId: text("post_id").references(() => posts.id, { onDelete: "cascade" }),
+    commentId: text("comment_id").references(() => comments.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull(),
+    note: text("note"),
+    status: text("status").notNull().default("open"),
+    resolvedBy: text("resolved_by").references(() => user.id, { onDelete: "set null" }),
+    resolvedAt: timestamp("resolved_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("reports_status_idx").on(t.status, t.createdAt)],
 );
 
 /* ------------------------------------------------------------------ */

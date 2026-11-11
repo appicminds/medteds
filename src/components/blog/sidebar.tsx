@@ -2,20 +2,22 @@ import Link from "next/link";
 import { Avatar } from "@/components/ui/avatar";
 import { Chip } from "@/components/ui/chip";
 import { FollowButton } from "@/components/blog/follow-button";
-import { followedTopics, listStories, listTopics, whoToFollow } from "@/lib/queries";
+import { followedTopics, listStories, listTopics, mutedBy, whoToFollow } from "@/lib/queries";
 import { getCurrentUser } from "@/lib/session";
 
 export async function Sidebar() {
   const me = await getCurrentUser();
-  const [picks, allTopics, people, mine] = await Promise.all([
-    listStories({ featured: true, limit: 3 }),
+  const [picks, allTopics, allPeople, mine] = await Promise.all([
+    listStories({ featured: true, limit: 3, viewerId: me?.id }),
     listTopics(),
-    whoToFollow(me?.id, 3),
+    whoToFollow(me?.id, 6),
     followedTopics(me?.id),
   ]);
+  const muted = await mutedBy(me?.id);
   // Recommend topics the reader doesn't follow yet.
   const followedIds = new Set(mine.map((t) => t.id));
-  const topics = allTopics.filter((t) => !followedIds.has(t.id)).slice(0, 8);
+  const topics = allTopics.filter((t) => !followedIds.has(t.id) && !muted.topics.has(t.id)).slice(0, 8);
+  const people = allPeople.filter((p) => !muted.users.has(p.id)).slice(0, 3);
   return (
     <div className="sticky top-[134px] flex flex-col gap-10">
       {picks.length ? (

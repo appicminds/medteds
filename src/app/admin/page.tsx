@@ -4,7 +4,7 @@ import { CommentQueue } from "@/components/admin/comment-queue";
 import { QuickDraft } from "@/components/admin/quick-draft";
 import { ViewsChart } from "@/components/admin/views-chart";
 import { can } from "@/lib/permissions";
-import { adminCommentCounts, adminListComments, adminStats, pendingReview, seoAttentionCount, topPosts, viewsByDay } from "@/lib/queries";
+import { adminCommentCounts, adminListComments, adminStats, openReportCount, pendingReview, seoAttentionCount, topPosts, viewsByDay } from "@/lib/queries";
 import { getSettings } from "@/lib/settings";
 import { requireCan } from "@/lib/session";
 import { compactNumber, formatDate } from "@/lib/utils";
@@ -26,7 +26,7 @@ function Card({ title, action, children, className }: { title: string; action?: 
 export default async function AdminDashboard() {
   const me = await requireCan("viewAdmin", "/admin");
   const settings = await getSettings();
-  const [stats, views, top, review, commentCounts, pendingComments, seoTodo] = await Promise.all([
+  const [stats, views, top, review, commentCounts, pendingComments, seoTodo, openReports] = await Promise.all([
     adminStats(),
     viewsByDay(30),
     topPosts(30, 5),
@@ -34,6 +34,7 @@ export default async function AdminDashboard() {
     adminCommentCounts(),
     adminListComments("pending", 5),
     can(me, "manageSeo") ? seoAttentionCount(settings.defaultShareImage) : Promise.resolve(0),
+    openReportCount(),
   ]);
   const total30 = views.reduce((n, d) => n + d.n, 0);
   const prev7 = views.slice(-14, -7).reduce((n, d) => n + d.n, 0);
@@ -45,6 +46,7 @@ export default async function AdminDashboard() {
     { label: "Live stories", value: stats.stories, href: "/admin/stories?status=published" },
     { label: "Waiting for review", value: stats.pending, href: "/admin/stories?status=pending", attention: stats.pending > 0 },
     { label: "Responses to approve", value: commentCounts.pending, href: "/admin/comments", attention: commentCounts.pending > 0 },
+    { label: "Reports to review", value: openReports, href: "/admin/reports", attention: openReports > 0 },
     { label: "Stories to improve for SEO", value: seoTodo, href: "/admin/seo?filter=attention", attention: seoTodo > 0 },
     { label: "Users", value: stats.users, href: can(me, "manageUsers") ? "/admin/users" : undefined },
   ];
@@ -53,7 +55,7 @@ export default async function AdminDashboard() {
     <>
       <AdminHeader title="Dashboard" description={`Welcome back, ${me.name.split(" ")[0]}.`} />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
         {glance.map((t) => {
           const inner = (
             <>

@@ -36,12 +36,16 @@ The rules live in `src/lib/permissions.ts`.
 
 | Page | Path |
 |---|---|
-| Home feed (For you, Following, topic tabs) | `/` |
+| Home feed: "For you" (followed topics and writers first), Following, and a scrolling topic bar | `/` |
 | Story | `/p/[slug]` |
 | Writer profile | `/@username` |
-| Topic / all topics | `/tag/[slug]`, `/topics` |
+| Topic page with Follow, and Explore topics | `/tag/[slug]`, `/topics` |
+| Pick your interests (after sign-up) | `/welcome/topics` |
+| Notifications: claps, responses, replies, new followers, new stories from writers you follow | `/notifications` |
+| Library: your lists, saved lists, highlights, reading history | `/library` |
+| A reading list (private, or public on your profile) | `/list/[id]` |
 | Search (stories, people, topics) | `/search?q=` |
-| Reading list | `/reading-list` |
+| Reading list (the default list) | `/reading-list` |
 | Pages from the CMS (About, Privacy, Terms, any new page) | `/[page]` |
 | Sign in, sign up, forgot/reset password, accept invitation | `/signin`, `/signup`, `/forgot-password`, `/reset-password`, `/invite/[token]` |
 
@@ -63,6 +67,7 @@ The rules live in `src/lib/permissions.ts`.
 | Media `/admin/media` | Image library: upload by drag and drop, alt text, copy link, where each image is used, delete |
 | Pages `/admin/pages` | Create and edit pages like About and Privacy |
 | SEO `/admin/seo` | Every story and page with its search title, description and score. Filter by "needs attention", edit any listing, reset to automatic, hide from search in bulk. Also topic listings, the home page listing, title separator, default sharing image, Google Search Console and sitemap links |
+| Reports `/admin/reports` | Stories and responses readers reported: move a story to trash, mark a response as spam, resolve or dismiss |
 | Comments `/admin/comments` | Approve, unapprove, spam or delete responses, one by one or in bulk |
 | Topics `/admin/topics` | Add, edit and delete topics |
 | Users `/admin/users` | Invite by email with a role, change roles, suspend, edit profiles, create password-reset links, delete with story reassignment |
@@ -79,6 +84,13 @@ SEO works automatically: each story's search title comes from its title, the des
 - To get listed on Google, verify the site in Google Search Console (paste the code in Admin → SEO → Site) and submit `/sitemap.xml`.
 
 Scheduled stories go live at their publish time automatically; no background job is needed. Trashed stories are deleted for good after 30 days.
+
+## Reading features
+
+- **Saving:** the bookmark icon saves to the reading list on the first click and opens a menu to add the story to other lists or start a new one.
+- **Highlights:** select text in a story to highlight it, quote it in a response, or copy it with a link. A passage highlighted by 3 or more readers shows to everyone as the top highlight.
+- **Responses:** reply to a response (one level deep), and clap for responses.
+- **Mute and report:** the "…" menu on a story mutes the writer or topic, or reports the story. Muted writers and topics disappear from feeds, the topic bar, the sidebar and search; readers can unmute them in Settings.
 
 ## Run it locally
 

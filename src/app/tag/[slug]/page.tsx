@@ -32,7 +32,7 @@ export default async function TopicPage({ params, searchParams }: PageProps<"/ta
   if (!topic) notFound();
   const me = await getCurrentUser();
   const [stories, all, followInfo] = await Promise.all([
-    listStories({ topicSlug: slug, limit: PAGE_SIZE + 1, offset: (page - 1) * PAGE_SIZE }),
+    listStories({ topicSlug: slug, viewerId: me?.id, limit: PAGE_SIZE + 1, offset: (page - 1) * PAGE_SIZE }),
     listTopics(),
     topicFollowInfo(me?.id),
   ]);
